@@ -61,7 +61,7 @@ data class ResolvedLicenseInfo(
      * detected.
      */
     val unmatchedCopyrights: Map<Provenance, Set<CopyrightFinding>>
-) : Iterable<ResolvedLicense> by licenses {
+) : Collection<ResolvedLicense> by licenses {
     operator fun get(license: SpdxSingleLicenseExpression): ResolvedLicense? = find { it.license == license }
 
     /**
