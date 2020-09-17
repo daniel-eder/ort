@@ -21,20 +21,19 @@ package org.ossreviewtoolkit.evaluator
 
 import org.ossreviewtoolkit.model.CuratedPackage
 import org.ossreviewtoolkit.model.Identifier
-import org.ossreviewtoolkit.model.LicenseFindings
 import org.ossreviewtoolkit.model.LicenseSource
 import org.ossreviewtoolkit.model.Package
 import org.ossreviewtoolkit.model.PackageCurationResult
 import org.ossreviewtoolkit.model.Project
 import org.ossreviewtoolkit.model.Severity
 import org.ossreviewtoolkit.model.config.Excludes
-import org.ossreviewtoolkit.model.config.PathExclude
 import org.ossreviewtoolkit.model.licenses.LicenseView
+import org.ossreviewtoolkit.model.licenses.ResolvedLicense
+import org.ossreviewtoolkit.model.licenses.ResolvedLicenseInfo
 import org.ossreviewtoolkit.spdx.SpdxExpression
 import org.ossreviewtoolkit.spdx.SpdxLicense
 import org.ossreviewtoolkit.spdx.SpdxLicenseIdExpression
 import org.ossreviewtoolkit.spdx.SpdxLicenseWithExceptionExpression
-import org.ossreviewtoolkit.spdx.SpdxSingleLicenseExpression
 
 /**
  * A [Rule] to check a single [Package].
@@ -54,9 +53,9 @@ open class PackageRule(
     val curations: List<PackageCurationResult>,
 
     /**
-     * The detected licenses for the [Package].
+     * The resolved license info for the [Package].
      */
-    val detectedLicenses: List<LicenseFindings>
+    val resolvedLicenseInfo: ResolvedLicenseInfo
 ) : Rule(ruleSet, name) {
     private val licenseRules = mutableListOf<LicenseRule>()
 
@@ -78,10 +77,7 @@ open class PackageRule(
         object : RuleMatcher {
             override val description = "hasLicense()"
 
-            override fun matches() =
-                pkg.concludedLicense?.licenses()?.isNotEmpty() == true
-                        || pkg.declaredLicenses.isNotEmpty()
-                        || detectedLicenses.isNotEmpty()
+            override fun matches() = resolvedLicenseInfo.filterExcluded().isNotEmpty()
         }
 
     /**
@@ -139,36 +135,28 @@ open class PackageRule(
      * A DSL function to configure a [LicenseRule] and add it to this rule.
      */
     fun licenseRule(name: String, licenseView: LicenseView, block: LicenseRule.() -> Unit) {
-        val licenses = licenseView.licenses(pkg, detectedLicenses.map { it.license })
-
-        licenses.forEach { (license, licenseSource) ->
-            val findings = if (licenseSource == LicenseSource.DETECTED) {
-                ruleSet.licenseFindings[pkg.id].orEmpty()
-            } else {
-                emptyMap()
-            }.filter { (finding, _) -> finding.license == license }
-
-            licenseRules += LicenseRule(name, license, licenseSource, findings).apply(block)
+        resolvedLicenseInfo.filter(licenseView).forEach { resolvedLicense ->
+            licenseRules += LicenseRule(name, resolvedLicense).apply(block)
         }
     }
 
     fun issue(severity: Severity, message: String, howToFix: String) =
-        issue(severity, pkg.id, null, null, message, howToFix)
+        issue(severity, pkg.id, null, emptySet(), message, howToFix)
 
     /**
      * Add a [hint][Severity.HINT] to the list of [violations].
      */
-    fun hint(message: String, howToFix: String) = hint(pkg.id, null, null, message, howToFix)
+    fun hint(message: String, howToFix: String) = hint(pkg.id, null, emptySet(), message, howToFix)
 
     /**
      * Add a [warning][Severity.WARNING] to the list of [violations].
      */
-    fun warning(message: String, howToFix: String) = warning(pkg.id, null, null, message, howToFix)
+    fun warning(message: String, howToFix: String) = warning(pkg.id, null, emptySet(), message, howToFix)
 
     /**
      * Add an [error][Severity.ERROR] to the list of [violations].
      */
-    fun error(message: String, howToFix: String) = error(pkg.id, null, null, message, howToFix)
+    fun error(message: String, howToFix: String) = error(pkg.id, null, emptySet(), message, howToFix)
 
     /**
      * A [Rule] to check a single license of the [package][pkg].
@@ -177,48 +165,36 @@ open class PackageRule(
         name: String,
 
         /**
-         * The license to check.
+         * The [ResolvedLicense].
          */
-        val license: SpdxSingleLicenseExpression,
-
-        /**
-         * The source of the license.
-         */
-        val licenseSource: LicenseSource,
-
-        /**
-         * The associated [LicenseFindings]. Only used if [licenseSource] is [LicenseSource.DETECTED].
-         */
-        val licenseFindings: Map<LicenseFindings, List<PathExclude>> = emptyMap()
+        val resolvedLicense: ResolvedLicense
     ) : Rule(ruleSet, name) {
+        /**
+         * A shortcut for the [license][ResolvedLicense.license] in [resolvedLicense].
+         */
+        val license = resolvedLicense.license
+
         /**
          * A helper function to access [PackageRule.pkg] in extension functions for [LicenseRule], required because the
          * properties of the outer class [PackageRule] cannot be accessed from an extension function.
          */
         fun pkg() = pkg
 
-        /**
-         * A helper function to access [PackageRule.detectedLicenses] in extension functions for [LicenseRule], required
-         * because the properties of the outer class [PackageRule] cannot be accessed from an extension function.
-         */
-        fun detectedLicenses() = detectedLicenses
+        override val description = "\tEvaluating license rule '$name' for license '${resolvedLicense.license}' " +
+                "(${resolvedLicense.sources.joinToString()})."
 
-        override val description = "\tEvaluating license rule '$name' for $licenseSource license '$license'."
-
-        override fun issueSource() = "$name - ${pkg.id.toCoordinates()} - $license ($licenseSource)"
+        override fun issueSource() = "$name - ${pkg.id.toCoordinates()} - ${resolvedLicense.license} " +
+                "(${resolvedLicense.sources.joinToString()})"
 
         /**
-         * A [RuleMatcher] that checks if a [detected][LicenseSource.DETECTED] license is excluded. This is the case if
-         * all keys of [licenseFindings] are associated to at least one [PathExclude].
+         * A [RuleMatcher] that checks if the [resolvedLicense] has the source [LicenseSource.DETECTED] and is
+         * [excluded][ResolvedLicense.isDetectedExcluded].
          */
-        fun isExcluded() =
+        fun isDetectedExcluded() =
             object : RuleMatcher {
                 override val description = "isExcluded($license)"
 
-                override fun matches() =
-                    licenseSource == LicenseSource.DETECTED
-                            && licenseFindings.isNotEmpty()
-                            && licenseFindings.values.all { it.isNotEmpty() }
+                override fun matches() = resolvedLicense.isDetectedExcluded
             }
 
         /**
@@ -236,21 +212,24 @@ open class PackageRule(
             }
 
         fun issue(severity: Severity, message: String, howToFix: String) =
-            issue(severity, pkg.id, license, licenseSource, message, howToFix)
+            issue(severity, pkg.id, license, resolvedLicense.sources, message, howToFix)
 
         /**
          * Add a [hint][Severity.HINT] to the list of [violations].
          */
-        fun hint(message: String, howToFix: String) = hint(pkg.id, license, licenseSource, message, howToFix)
+        fun hint(message: String, howToFix: String) =
+            hint(pkg.id, license, resolvedLicense.sources, message, howToFix)
 
         /**
          * Add a [warning][Severity.WARNING] to the list of [violations].
          */
-        fun warning(message: String, howToFix: String) = warning(pkg.id, license, licenseSource, message, howToFix)
+        fun warning(message: String, howToFix: String) =
+            warning(pkg.id, license, resolvedLicense.sources, message, howToFix)
 
         /**
          * Add an [error][Severity.ERROR] to the list of [violations].
          */
-        fun error(message: String, howToFix: String) = error(pkg.id, license, licenseSource, message, howToFix)
+        fun error(message: String, howToFix: String) =
+            error(pkg.id, license, resolvedLicense.sources, message, howToFix)
     }
 }

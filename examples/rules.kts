@@ -96,7 +96,7 @@ fun PackageRule.LicenseRule.isCopyleftLimited() =
  */
 
 // Define the set of policy rules.
-val ruleSet = ruleSet(ortResult, packageConfigurationProvider) {
+val ruleSet = ruleSet(ortResult, licenseInfoResolver) {
     // Define a rule that is executed for each package.
     packageRule("UNHANDLED_LICENSE") {
         // Do not trigger this rule on packages that have been excluded in the .ort.yml.
@@ -113,9 +113,8 @@ val ruleSet = ruleSet(ortResult, packageConfigurationProvider) {
 
             // Throw an error message including guidance how to fix the issue.
             error(
-                "The license $license is currently not covered by policy rules. " +
-                        "The license was ${licenseSource.name.toLowerCase()} in package " +
-                        "${pkg.id.toCoordinates()}",
+                "The license $license (${resolvedLicense.sources.joinToString()}) is currently not covered by policy " +
+                        "rules.",
                 howToFixDefault()
             )
         }
@@ -126,7 +125,7 @@ val ruleSet = ruleSet(ortResult, packageConfigurationProvider) {
             -isExcluded()
         }
 
-        pkg.declaredLicensesProcessed.unmapped.forEach { unmappedLicense ->
+        resolvedLicenseInfo.licenseInfo.declaredLicenseInfo.processed.unmapped.forEach { unmappedLicense ->
             warning(
                 "The declared license '$unmappedLicense' could not be mapped to a valid license or parsed as an SPDX " +
                         "expression. The license was found in package ${pkg.id.toCoordinates()}.",
@@ -146,13 +145,8 @@ val ruleSet = ruleSet(ortResult, packageConfigurationProvider) {
                 +isCopyleft()
             }
 
-            val message = if (licenseSource == LicenseSource.DETECTED) {
-                "The ScanCode copyleft categorized license $license was ${licenseSource.name.toLowerCase()} " +
-                        "in package ${pkg.id.toCoordinates()}."
-            } else {
-                "The package ${pkg.id.toCoordinates()} has the ${licenseSource.name.toLowerCase()} " +
-                        " ScanCode copyleft catalogized license $license."
-            }
+            val message = "The ScanCode copyleft categorized license $license " +
+                    "(${resolvedLicense.sources.joinToString()}) was found in package ${pkg.id.toCoordinates()}."
 
             error(message, howToFixDefault())
         }
@@ -163,18 +157,8 @@ val ruleSet = ruleSet(ortResult, packageConfigurationProvider) {
                 +isCopyleftLimited()
             }
 
-            val message = if (licenseSource == LicenseSource.DETECTED) {
-                if (pkg.id.type == "Unmanaged") {
-                    "The ScanCode copyleft-limited categorized license $license was ${licenseSource.name.toLowerCase()} " +
-                            "in package ${pkg.id.toCoordinates()}."
-                } else {
-                    "The ScanCode copyleft-limited categorized license $license was ${licenseSource.name.toLowerCase()} " +
-                            "in package ${pkg.id.toCoordinates()}."
-                }
-            } else {
-                "The package ${pkg.id.toCoordinates()} has the ${licenseSource.name.toLowerCase()} " +
-                        " ScanCode copyleft-limited categorized license $license."
-            }
+            val message = "The ScanCode copyleft-limited categorized license $license " +
+                    "(${resolvedLicense.sources.joinToString()}) was found in package ${pkg.id.toCoordinates()}."
 
             error(message, howToFixDefault())
         }
@@ -211,7 +195,7 @@ val ruleSet = ruleSet(ortResult, packageConfigurationProvider) {
             issue(
                 Severity.WARNING,
                 "The project ${project.id.toCoordinates()} has a statically linked direct dependency licensed " +
-                        "under the ScanCode copyleft-left categorized license $license.",
+                        "under the ScanCode copyleft categorized license $license.",
                 howToFixDefault()
             )
         }

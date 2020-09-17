@@ -21,6 +21,7 @@ package org.ossreviewtoolkit.evaluator
 
 import io.kotest.core.spec.style.WordSpec
 import io.kotest.matchers.collections.beEmpty
+import io.kotest.matchers.collections.containExactly
 import io.kotest.matchers.collections.haveSize
 import io.kotest.matchers.should
 import io.kotest.matchers.shouldBe
@@ -29,11 +30,11 @@ import org.ossreviewtoolkit.model.Identifier
 import org.ossreviewtoolkit.model.LicenseSource
 import org.ossreviewtoolkit.model.OrtResult
 import org.ossreviewtoolkit.model.Severity
-import org.ossreviewtoolkit.model.utils.SimplePackageConfigurationProvider
+import org.ossreviewtoolkit.model.utils.createLicenseInfoResolver
 import org.ossreviewtoolkit.spdx.toSpdx
 
 class EvaluatorTest : WordSpec() {
-    private fun createEvaluator() = Evaluator(OrtResult.EMPTY, SimplePackageConfigurationProvider.EMPTY)
+    private fun createEvaluator() = Evaluator(OrtResult.EMPTY, ortResult.createLicenseInfoResolver())
 
     init {
         "checkSyntax" should {
@@ -80,7 +81,7 @@ class EvaluatorTest : WordSpec() {
                         rule = "rule 1",
                         pkg = Identifier("type:namespace:name:1.0"),
                         license = SpdxLicenseIdExpression("license-1"),
-                        licenseSource = LicenseSource.DETECTED,
+                        licenseSources = setOf(LicenseSource.DETECTED),
                         severity = Severity.ERROR,
                         message = "message 1",
                         howToFix = "how to fix 1"
@@ -90,7 +91,7 @@ class EvaluatorTest : WordSpec() {
                         rule = "rule 2",
                         pkg = Identifier("type:namespace:name:2.0"),
                         license = SpdxLicenseIdExpression("license-2"),
-                        licenseSource = LicenseSource.DECLARED,
+                        licenseSources = setOf(LicenseSource.DECLARED),
                         severity = Severity.WARNING,
                         message = "message 2",
                         howToFix = "how to fix 2"
@@ -104,7 +105,7 @@ class EvaluatorTest : WordSpec() {
                     rule shouldBe "rule 1"
                     pkg shouldBe Identifier("type:namespace:name:1.0")
                     license shouldBe "license-1".toSpdx()
-                    licenseSource shouldBe LicenseSource.DETECTED
+                    licenseSources should containExactly(LicenseSource.DETECTED)
                     severity shouldBe Severity.ERROR
                     message shouldBe "message 1"
                     howToFix shouldBe "how to fix 1"
@@ -114,7 +115,7 @@ class EvaluatorTest : WordSpec() {
                     rule shouldBe "rule 2"
                     pkg shouldBe Identifier("type:namespace:name:2.0")
                     license shouldBe "license-2".toSpdx()
-                    licenseSource shouldBe LicenseSource.DECLARED
+                    licenseSources should containExactly(LicenseSource.DECLARED)
                     severity shouldBe Severity.WARNING
                     message shouldBe "message 2"
                     howToFix shouldBe "how to fix 2"

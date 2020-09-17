@@ -28,7 +28,7 @@ class WebAppRuleViolation {
 
     #licenseIndex;
 
-    #licenseSource;
+    #licenseSources = new Set();
 
     #message;
 
@@ -63,9 +63,9 @@ class WebAppRuleViolation {
                 this.#licenseIndex = obj.license;
             }
 
-            if (obj.license_source || obj.licenseSource) {
-                this.#licenseSource = obj.license_source
-                    || obj.licenseSource;
+            if (obj.license_sources || obj.licenseSources) {
+                this.#licenseSources = obj.license_sources
+                    || obj.licenseSources;
             }
 
             if (obj.message) {

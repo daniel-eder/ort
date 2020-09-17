@@ -35,8 +35,8 @@ data class EvaluatedRuleViolation(
     val pkg: EvaluatedPackage,
     @JsonInclude(JsonInclude.Include.NON_NULL)
     val license: LicenseId?,
-    @JsonInclude(JsonInclude.Include.NON_NULL)
-    val licenseSource: LicenseSource?,
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    val licenseSources: Set<LicenseSource>,
     val severity: Severity,
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
     val message: String,

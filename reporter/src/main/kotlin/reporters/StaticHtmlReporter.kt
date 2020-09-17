@@ -280,7 +280,7 @@ class StaticHtmlReporter : Reporter {
             td { +ruleViolation.violation.pkg.toCoordinates() }
             td {
                 +if (ruleViolation.violation.license != null) {
-                    "${ruleViolation.violation.licenseSource}: ${ruleViolation.violation.license}"
+                    "${ruleViolation.violation.licenseSources.joinToString()}: ${ruleViolation.violation.license}"
                 } else {
                     "-"
                 }
