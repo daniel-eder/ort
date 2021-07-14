@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -44,6 +44,7 @@ import org.ossreviewtoolkit.model.VcsType
 import org.ossreviewtoolkit.model.config.AnalyzerConfiguration
 import org.ossreviewtoolkit.model.config.RepositoryConfiguration
 import org.ossreviewtoolkit.model.createAndLogIssue
+import org.ossreviewtoolkit.model.orEmpty
 import org.ossreviewtoolkit.model.readJsonFile
 import org.ossreviewtoolkit.utils.CommandLineTool
 import org.ossreviewtoolkit.utils.Os
@@ -321,20 +322,20 @@ class Composer(
             packageInfo["license"]?.mapNotNullTo(set) { it.textValue() }
         }
 
-    private fun parseVcsInfo(packageInfo: JsonNode) =
+    private fun parseVcsInfo(packageInfo: JsonNode): VcsInfo =
         packageInfo["source"]?.let {
             VcsInfo(
-                VcsType(it["type"].textValueOrEmpty()),
-                it["url"].textValueOrEmpty(),
-                it["reference"].textValueOrEmpty()
+                type = VcsType(it["type"].textValueOrEmpty()),
+                url = it["url"].textValueOrEmpty(),
+                revision = it["reference"].textValueOrEmpty()
             )
-        } ?: VcsInfo.EMPTY
+        }.orEmpty()
 
     private fun parseArtifact(packageInfo: JsonNode) =
         packageInfo["dist"]?.let {
             val shasum = it["shasum"].textValueOrEmpty()
             RemoteArtifact(it["url"].textValueOrEmpty(), Hash.create(shasum))
-        } ?: RemoteArtifact.EMPTY
+        }.orEmpty()
 
     private fun getRuntimeDependencies(packageName: String, lockFile: JsonNode): Sequence<String> {
         listOf("packages", "packages-dev").forEach {
@@ -356,6 +357,6 @@ class Composer(
 
         // The "install" command creates a "composer.lock" file (if not yet present) except for projects without any
         // dependencies, see https://getcomposer.org/doc/01-basic-usage.md#installing-without-composer-lock.
-        run(workingDir, "install")
+        run(workingDir, "install", "--ignore-platform-reqs")
     }
 }

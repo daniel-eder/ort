@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -40,7 +40,8 @@ class ScanResultContainerTest : WordSpec() {
         sourceArtifact = RemoteArtifact("url", Hash.create("hash"))
     )
     private val provenance2 = RepositoryProvenance(
-        vcsInfo = VcsInfo(VcsType("type"), "url", "revision", "resolvedRevision", "path")
+        vcsInfo = VcsInfo(VcsType("type"), "url", "revision", "path"),
+        resolvedRevision = "resolvedRevision"
     )
 
     private val scannerDetails1 = ScannerDetails("name 1", "version 1", "config 1")
@@ -59,7 +60,6 @@ class ScanResultContainerTest : WordSpec() {
     private val scanSummary1 = ScanSummary(
         scannerStartTime1,
         scannerEndTime1,
-        1,
         "packageVerificationCode",
         sortedSetOf(
             LicenseFinding(
@@ -86,7 +86,6 @@ class ScanResultContainerTest : WordSpec() {
     private val scanSummary2 = ScanSummary(
         scannerStartTime2,
         scannerEndTime2,
-        2,
         "packageVerificationCode",
         sortedSetOf(
             LicenseFinding(

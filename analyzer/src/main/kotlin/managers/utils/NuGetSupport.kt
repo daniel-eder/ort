@@ -7,7 +7,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -64,6 +64,7 @@ import org.ossreviewtoolkit.model.Scope
 import org.ossreviewtoolkit.model.VcsInfo
 import org.ossreviewtoolkit.model.VcsType
 import org.ossreviewtoolkit.model.createAndLogIssue
+import org.ossreviewtoolkit.model.orEmpty
 import org.ossreviewtoolkit.utils.OkHttpClientHelper
 import org.ossreviewtoolkit.utils.await
 import org.ossreviewtoolkit.utils.collectMessagesAsString
@@ -147,7 +148,7 @@ class NuGetSupport(serviceIndexUrls: List<String> = listOf(DEFAULT_SERVICE_INDEX
 
     private fun getAllPackageData(id: Identifier): NuGetAllPackageData {
         // Note: The package name in the URL is case-sensitive and must be lower-case!
-        val lowerId = id.name.toLowerCase()
+        val lowerId = id.name.lowercase()
 
         val data = registrationsBaseUrls.asSequence().mapNotNull { baseUrl ->
             runCatching {
@@ -172,11 +173,9 @@ class NuGetSupport(serviceIndexUrls: List<String> = listOf(DEFAULT_SERVICE_INDEX
             VcsInfo(
                 type = VcsType(it.type.orEmpty()),
                 url = it.url.orEmpty(),
-                revision = (it.branch ?: it.commit).orEmpty(),
-                resolvedRevision = it.commit,
-                path = ""
+                revision = (it.commit ?: it.branch).orEmpty()
             )
-        } ?: VcsInfo.EMPTY
+        }.orEmpty()
 
         return with(all.details) {
             Package(

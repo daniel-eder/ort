@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -92,25 +92,25 @@ internal class StatisticsCalculator {
         ortResult
             .getProjects()
             .filterNot { project -> ignoreExcluded && ortResult.isExcluded(project.id) }
-            .flatMap { project -> project.scopes }
-            .filterNot { scope -> ignoreExcluded && ortResult.repository.config.excludes.isScopeExcluded(scope) }
-            .map { scope -> scope.getDependencyTreeDepth() }
+            .flatMap { project ->
+                val scopes = ortResult.dependencyNavigator.scopeNames(project)
+                MutableList(scopes.size) { project }.zip(scopes)
+            }.filterNot { (_, scope) -> ignoreExcluded && ortResult.repository.config.excludes.isScopeExcluded(scope) }
+            .map { (project, scope) -> ortResult.dependencyNavigator.dependencyTreeDepth(project, scope) }
             .maxOrNull() ?: 0
 
     private fun getIncludedScopes(ortResult: OrtResult): Set<String> =
         ortResult
             .getProjects()
             .filterNot { project -> ortResult.isExcluded(project.id) }
-            .flatMap { project -> project.scopes }
+            .flatMap { project -> ortResult.dependencyNavigator.scopeNames(project) }
             .filterNot { scope -> ortResult.repository.config.excludes.isScopeExcluded(scope) }
-            .map { scope -> scope.name }
             .toSet()
 
     private fun getExcludedScopes(ortResult: OrtResult): Set<String> =
         ortResult
             .getProjects()
-            .flatMap { project -> project.scopes }
-            .map { scope -> scope.name }
+            .flatMap { project -> ortResult.dependencyNavigator.scopeNames(project) }
             .toSet()
             .let { allScopes ->
                 allScopes - getIncludedScopes(ortResult)

@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -17,7 +17,7 @@
  * License-Filename: LICENSE
  */
 
-package org.ossreviewtoolkit.commands
+package org.ossreviewtoolkit.cli.commands
 
 import com.github.ajalt.clikt.core.BadParameterValue
 import com.github.ajalt.clikt.core.CliktCommand
@@ -34,11 +34,14 @@ import com.github.ajalt.clikt.parameters.options.split
 import com.github.ajalt.clikt.parameters.types.enum
 import com.github.ajalt.clikt.parameters.types.file
 
-import org.ossreviewtoolkit.GlobalOptions
 import org.ossreviewtoolkit.advisor.Advisor
+import org.ossreviewtoolkit.cli.GlobalOptions
+import org.ossreviewtoolkit.cli.concludeSeverityStats
+import org.ossreviewtoolkit.cli.utils.outputGroup
+import org.ossreviewtoolkit.cli.utils.readOrtResult
+import org.ossreviewtoolkit.cli.utils.writeOrtResult
 import org.ossreviewtoolkit.model.FileFormat
 import org.ossreviewtoolkit.model.utils.mergeLabels
-import org.ossreviewtoolkit.model.writeValue
 import org.ossreviewtoolkit.utils.expandTilde
 import org.ossreviewtoolkit.utils.safeMkdirs
 
@@ -107,27 +110,23 @@ class AdvisorCommand : CliktCommand(name = "advise", help = "Check dependencies 
         println("The following advisors are activated:")
         println("\t" + distinctProviders.joinToString())
 
-        val advisor = Advisor(distinctProviders, globalOptionsForSubcommands.config.advisor)
+        val config = globalOptionsForSubcommands.config
+        val advisor = Advisor(distinctProviders, config.advisor)
 
-        val ortResult = advisor.retrieveVulnerabilityInformation(ortFile, skipExcluded).mergeLabels(labels)
+        val ortResultInput = readOrtResult(ortFile)
+        val ortResultOutput = advisor.retrieveVulnerabilityInformation(ortResultInput, skipExcluded).mergeLabels(labels)
 
         outputDir.safeMkdirs()
+        writeOrtResult(ortResultOutput, outputFiles, "advisor")
 
-        outputFiles.forEach { file ->
-            println("Writing advisor result to '$file'.")
-            file.writeValue(ortResult)
-        }
-
-        val advisorResults = ortResult.advisor?.results
+        val advisorResults = ortResultOutput.advisor?.results
 
         if (advisorResults == null) {
             println("There was an error creating the advisor results.")
             throw ProgramResult(1)
         }
 
-        if (advisorResults.hasIssues) {
-            println("The advisor result contains issues.")
-            throw ProgramResult(2)
-        }
+        val counts = advisorResults.collectIssues().flatMap { it.value }.groupingBy { it.severity }.eachCount()
+        concludeSeverityStats(counts, config.severeIssueThreshold, 2)
     }
 }

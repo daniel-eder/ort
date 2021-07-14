@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -28,7 +28,6 @@ import java.io.File
 import java.io.IOException
 import java.time.Instant
 
-import kotlin.io.path.createTempDirectory
 import kotlin.time.measureTime
 import kotlin.time.measureTimedValue
 
@@ -62,6 +61,7 @@ import org.ossreviewtoolkit.utils.CommandLineTool
 import org.ossreviewtoolkit.utils.Environment
 import org.ossreviewtoolkit.utils.Os
 import org.ossreviewtoolkit.utils.collectMessagesAsString
+import org.ossreviewtoolkit.utils.createOrtTempDir
 import org.ossreviewtoolkit.utils.fileSystemEncode
 import org.ossreviewtoolkit.utils.getPathFromEnvironment
 import org.ossreviewtoolkit.utils.log
@@ -136,7 +136,7 @@ abstract class LocalScanner(
                 }
 
                 log.perf {
-                    "Bootstrapped scanner '$scannerName' version $expectedVersion in ${duration.inMilliseconds}ms."
+                    "Bootstrapped scanner '$scannerName' version $expectedVersion in ${duration.inWholeMilliseconds}ms."
                 }
 
                 bootstrapDirectory
@@ -225,11 +225,13 @@ abstract class LocalScanner(
 
         log.info { "Scanning ${remainingPackages.size} packages for which no stored scan results were found." }
 
-        val downloadDirectory = createTempDirectory().toFile()
+        val downloadDirectory = createOrtTempDir()
 
-        val resultsFromScanner = remainingPackages.scan(outputDirectory, downloadDirectory)
-
-        downloadDirectory.safeDeleteRecursively(force = true)
+        val resultsFromScanner = try {
+            remainingPackages.scan(outputDirectory, downloadDirectory)
+        } finally {
+            downloadDirectory.safeDeleteRecursively(force = true)
+        }
 
         return resultsFromStorage + resultsFromScanner
     }
@@ -292,7 +294,6 @@ abstract class LocalScanner(
             summary = ScanSummary(
                 startTime = now,
                 endTime = now,
-                fileCount = 0,
                 packageVerificationCode = "",
                 licenseFindings = sortedSetOf(),
                 copyrightFindings = sortedSetOf(),
@@ -314,20 +315,22 @@ abstract class LocalScanner(
 
         if (missingArchives.isEmpty()) return
 
-        val tempDirectory = createTempDirectory().toFile()
+        val tempDirectory = createOrtTempDir()
 
-        missingArchives.forEach { (pkg, provenance) ->
-            val downloadDirectory = tempDirectory.resolve(pkg.id.toPath())
-            val downloadProvenance = Downloader(downloaderConfig).download(pkg, downloadDirectory)
+        try {
+            missingArchives.forEach { (pkg, provenance) ->
+                val downloadDirectory = tempDirectory.resolve(pkg.id.toPath()).resolve(provenance.javaClass.simpleName)
+                val downloadProvenance = Downloader(downloaderConfig).download(pkg, downloadDirectory)
 
-            if (downloadProvenance == provenance) {
-                archiveFiles(downloadDirectory, pkg.id, provenance)
-            } else {
-                log.warn { "Mismatching provenance when creating missing archive for $provenance." }
+                if (downloadProvenance == provenance) {
+                    archiveFiles(downloadDirectory, pkg.id, provenance)
+                } else {
+                    log.warn { "Mismatching provenance when creating missing archive for $provenance." }
+                }
             }
+        } finally {
+            tempDirectory.safeDeleteRecursively(force = true)
         }
-
-        tempDirectory.safeDeleteRecursively(force = true)
     }
 
     /**
@@ -368,7 +371,6 @@ abstract class LocalScanner(
                 ScanSummary(
                     startTime = now,
                     endTime = now,
-                    fileCount = 0,
                     packageVerificationCode = "",
                     licenseFindings = sortedSetOf(),
                     copyrightFindings = sortedSetOf(),
@@ -399,7 +401,7 @@ abstract class LocalScanner(
 
         log.perf {
             "Scanned source code of '${pkg.id.toCoordinates()}' with ${javaClass.simpleName} in " +
-                    "${scanDuration.inMilliseconds}ms."
+                    "${scanDuration.inWholeMilliseconds}ms."
         }
 
         val scanResult = ScanResult(provenance, scannerDetails, scanSummary)
@@ -426,7 +428,7 @@ abstract class LocalScanner(
 
         val duration = measureTime { archiver.archive(directory, provenance) }
 
-        log.perf { "Archived files for '${id.toCoordinates()}' in ${duration.inMilliseconds}ms." }
+        log.perf { "Archived files for '${id.toCoordinates()}' in ${duration.inWholeMilliseconds}ms." }
     }
 
     /**
@@ -475,7 +477,6 @@ abstract class LocalScanner(
             ScanSummary(
                 startTime = now,
                 endTime = now,
-                fileCount = 0,
                 packageVerificationCode = "",
                 licenseFindings = sortedSetOf(),
                 copyrightFindings = sortedSetOf(),
@@ -507,7 +508,7 @@ abstract class LocalScanner(
     /**
      * Return the scanner's raw result in a JSON representation.
      */
-    internal abstract fun getRawResult(resultsFile: File): JsonNode
+    abstract fun getRawResult(resultsFile: File): JsonNode
 
     /**
      * Return the invariant relative path of the [scanned file][scannedFilename] with respect to the

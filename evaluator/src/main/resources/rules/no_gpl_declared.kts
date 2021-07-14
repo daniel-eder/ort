@@ -6,7 +6,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,7 +20,7 @@
 
 // Use this rule like:
 //
-// $ ort evaluate -i scanner/src/funTest/assets/file-counter-expected-output-for-analyzer-result.yml --rules-resource /rules/no_gpl_declared.kts
+// $ ort evaluate -i scanner/src/funTest/assets/dummy-expected-output-for-analyzer-result.yml --rules-resource /rules/no_gpl_declared.kts
 
 // Define a custom rule matcher.
 fun PackageRule.LicenseRule.isGpl() =

@@ -6,7 +6,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -200,7 +200,7 @@ abstract class ScanResultsStorage {
 
             log.perf {
                 "Read ${result.result.size} scan results for '${id.toCoordinates()}' from " +
-                        "${javaClass.simpleName} in ${duration.inMilliseconds}ms."
+                        "${javaClass.simpleName} in ${duration.inWholeMilliseconds}ms."
             }
         }
 
@@ -228,7 +228,7 @@ abstract class ScanResultsStorage {
 
             log.perf {
                 "Read ${result.result.size} scan results for '${pkg.id.toCoordinates()}' from " +
-                        "${javaClass.simpleName} in ${duration.inMilliseconds}ms."
+                        "${javaClass.simpleName} in ${duration.inWholeMilliseconds}ms."
             }
         }
 
@@ -256,8 +256,8 @@ abstract class ScanResultsStorage {
             stats.numHits.addAndGet(result.result.count { (_, results) -> results.isNotEmpty() })
 
             log.perf {
-                "Read ${result.result.values.sumBy { it.size }} scan results from ${javaClass.simpleName} in " +
-                        "${duration.inMilliseconds}ms."
+                "Read ${result.result.values.sumOf { it.size }} scan results from ${javaClass.simpleName} in " +
+                        "${duration.inWholeMilliseconds}ms."
             }
         }
 
@@ -271,15 +271,6 @@ abstract class ScanResultsStorage {
      * Return a [Result] describing whether the operation was successful.
      */
     fun add(id: Identifier, scanResult: ScanResult): Result<Unit> {
-        // Do not store empty scan results. It is likely that something went wrong when they were created, and if not,
-        // it is cheap to re-create them.
-        if (scanResult.summary.fileCount == 0) {
-            val message = "Not storing scan result for '${id.toCoordinates()}' because no files were scanned."
-            log.info { message }
-
-            return Failure(message)
-        }
-
         // Do not store scan results without provenance information, because they cannot be assigned to the revision of
         // the package source code later.
         if (scanResult.provenance is UnknownProvenance) {
@@ -293,7 +284,8 @@ abstract class ScanResultsStorage {
         val (result, duration) = measureTimedValue { addInternal(id, scanResult) }
 
         log.perf {
-            "Added scan result for '${id.toCoordinates()}' to ${javaClass.simpleName} in ${duration.inMilliseconds}ms."
+            "Added scan result for '${id.toCoordinates()}' to ${javaClass.simpleName} in " +
+                    "${duration.inWholeMilliseconds}ms."
         }
 
         return result

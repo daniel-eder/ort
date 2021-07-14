@@ -7,7 +7,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -28,6 +28,7 @@ val mockkVersion: String by project
 val semverVersion: String by project
 val sw360ClientVersion: String by project
 val toml4jVersion: String by project
+val wiremockVersion: String by project
 
 plugins {
     // Apply core plugins.
@@ -37,7 +38,7 @@ plugins {
 repositories {
     exclusiveContent {
         forRepository {
-            maven("https://repo.gradle.org/gradle/libs-releases-local/")
+            maven("https://repo.gradle.org/artifactory/libs-releases-local/")
         }
 
         filter {
@@ -82,5 +83,6 @@ dependencies {
     implementation("org.gradle:gradle-tooling-api:${gradle.gradleVersion}")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:$kotlinxCoroutinesVersion")
 
+    testImplementation("com.github.tomakehurst:wiremock:$wiremockVersion")
     testImplementation("io.mockk:mockk:$mockkVersion")
 }

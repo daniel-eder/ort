@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,21 +23,18 @@ import io.kotest.core.Tag
 import io.kotest.core.spec.Spec
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.core.test.TestCase
-import io.kotest.core.test.TestResult
 import io.kotest.inspectors.forAll
 import io.kotest.matchers.file.shouldNotStartWithPath
 import io.kotest.matchers.shouldBe
 
 import java.io.File
 
-import kotlin.io.path.createTempDirectory
-
 import org.ossreviewtoolkit.model.config.DownloaderConfiguration
 import org.ossreviewtoolkit.model.config.ScannerConfiguration
 import org.ossreviewtoolkit.scanner.LocalScanner
 import org.ossreviewtoolkit.spdx.SpdxExpression
-import org.ossreviewtoolkit.utils.ORT_NAME
-import org.ossreviewtoolkit.utils.safeDeleteRecursively
+import org.ossreviewtoolkit.utils.test.createSpecTempDir
+import org.ossreviewtoolkit.utils.test.createTestTempDir
 import org.ossreviewtoolkit.utils.test.shouldNotBeNull
 
 abstract class AbstractScannerFunTest(testTags: Set<Tag> = emptySet()) : StringSpec() {
@@ -57,7 +54,7 @@ abstract class AbstractScannerFunTest(testTags: Set<Tag> = emptySet()) : StringS
 
     override fun beforeSpec(spec: Spec) {
         super.beforeSpec(spec)
-        inputDir = createTempDirectory("$ORT_NAME-${javaClass.simpleName}").toFile()
+        inputDir = createSpecTempDir()
 
         // Copy our own root license under different names to a temporary directory so we have something to operate on.
         val ortLicense = File("../LICENSE")
@@ -66,17 +63,7 @@ abstract class AbstractScannerFunTest(testTags: Set<Tag> = emptySet()) : StringS
 
     override fun beforeTest(testCase: TestCase) {
         super.beforeTest(testCase)
-        outputDir = createTempDirectory("$ORT_NAME-${javaClass.simpleName}").toFile()
-    }
-
-    override fun afterTest(testCase: TestCase, result: TestResult) {
-        outputDir.safeDeleteRecursively()
-        super.afterTest(testCase, result)
-    }
-
-    override fun afterSpec(spec: Spec) {
-        inputDir.safeDeleteRecursively()
-        super.afterSpec(spec)
+        outputDir = createTestTempDir()
     }
 
     init {
@@ -85,7 +72,6 @@ abstract class AbstractScannerFunTest(testTags: Set<Tag> = emptySet()) : StringS
             val summary = result.scanner?.results?.scanResults?.singleOrNull()?.singleOrNull()?.summary
 
             summary shouldNotBeNull {
-                fileCount shouldBe 1
                 licenses shouldBe expectedFileLicenses
                 licenseFindings.forAll {
                     File(it.location.path) shouldNotStartWithPath inputDir
@@ -98,7 +84,6 @@ abstract class AbstractScannerFunTest(testTags: Set<Tag> = emptySet()) : StringS
             val summary = result.scanner?.results?.scanResults?.singleOrNull()?.singleOrNull()?.summary
 
             summary shouldNotBeNull {
-                fileCount shouldBe commonlyDetectedFiles.size
                 licenses shouldBe expectedDirectoryLicenses
                 licenseFindings.forAll {
                     File(it.location.path) shouldNotStartWithPath inputDir

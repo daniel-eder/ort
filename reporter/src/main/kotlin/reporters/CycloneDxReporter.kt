@@ -6,7 +6,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -121,7 +121,7 @@ class CycloneDxReporter : Reporter {
         val createSingleBom = !options[OPTION_SINGLE_BOM].isFalse()
         val outputFileFormats = options[OPTION_OUTPUT_FILE_FORMATS]
             ?.split(",")
-            ?.mapTo(mutableSetOf()) { FileFormat.valueOf(it.toUpperCase()) }
+            ?.mapTo(mutableSetOf()) { FileFormat.valueOf(it.uppercase()) }
             ?: setOf(FileFormat.XML)
 
         if (createSingleBom) {
@@ -146,7 +146,10 @@ class CycloneDxReporter : Reporter {
                 "URL to the ${vcs.type} repository of the projects"
             )
 
-            val allDirectDependencies = projects.flatMapTo(mutableSetOf()) { it.collectDependencies(1) }
+            val allDirectDependencies = projects.flatMapTo(mutableSetOf()) { project ->
+                input.ortResult.dependencyNavigator.projectDependencies(project, maxDepth = 1)
+            }
+
             input.ortResult.getPackages().forEach { (pkg, _) ->
                 val dependencyType = if (pkg.id in allDirectDependencies) "direct" else "transitive"
                 addPackageToBom(input, pkg, bom, dependencyType)
@@ -179,12 +182,13 @@ class CycloneDxReporter : Reporter {
                     "Package-URL of the project"
                 )
 
-                val dependencies = project.collectDependencies()
+                val dependencies = input.ortResult.dependencyNavigator.projectDependencies(project)
                 val packages = input.ortResult.getPackages().mapNotNull { (pkg, _) ->
                     pkg.takeIf { it.id in dependencies }
                 }
 
-                val directDependencies = project.collectDependencies(1)
+                val directDependencies =
+                    input.ortResult.dependencyNavigator.projectDependencies(project, maxDepth = 1)
                 packages.forEach { pkg ->
                     val dependencyType = if (pkg.id in directDependencies) "direct" else "transitive"
                     addPackageToBom(input, pkg, bom, dependencyType)

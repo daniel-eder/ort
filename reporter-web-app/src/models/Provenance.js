@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019-2020 HERE Europe B.V.
+ * Copyright (C) 2019-2021 HERE Europe B.V.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,8 +25,6 @@ class Provenance {
 
     #vcsInfo = new VcsInfo();
 
-    #originalVcsInfo = new VcsInfo();
-
     constructor(obj) {
         if (obj instanceof Object) {
             if (obj.source_artifact || obj.sourceArtifact) {
@@ -35,10 +33,6 @@ class Provenance {
 
             if (obj.vcs_info || obj.vcsInfo) {
                 this.#vcsInfo = obj.vcs_info || obj.vcsInfo;
-            }
-
-            if (obj.original_vcs_info || obj.originalVcsInfo) {
-                this.#originalVcsInfo = obj.original_vcs_info || obj.originalVcsInfo;
             }
         }
     }
@@ -49,10 +43,6 @@ class Provenance {
 
     get vcsInfo() {
         return this.#vcsInfo;
-    }
-
-    get originalVcsInfo() {
-        return this.#originalVcsInfo;
     }
 }
 

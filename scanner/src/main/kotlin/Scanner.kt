@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,8 +24,6 @@ import java.lang.IllegalArgumentException
 import java.time.Instant
 import java.util.ServiceLoader
 
-import kotlin.time.measureTimedValue
-
 import kotlinx.coroutines.runBlocking
 
 import org.ossreviewtoolkit.downloader.consolidateProjectPackagesByVcs
@@ -38,14 +36,9 @@ import org.ossreviewtoolkit.model.ScannerRun
 import org.ossreviewtoolkit.model.config.DownloaderConfiguration
 import org.ossreviewtoolkit.model.config.ScannerConfiguration
 import org.ossreviewtoolkit.model.config.ScannerOptions
-import org.ossreviewtoolkit.model.readValue
 import org.ossreviewtoolkit.model.utils.filterByProject
-import org.ossreviewtoolkit.spdx.SpdxConstants
-import org.ossreviewtoolkit.spdx.SpdxLicense
 import org.ossreviewtoolkit.utils.Environment
-import org.ossreviewtoolkit.utils.formatSizeInMib
 import org.ossreviewtoolkit.utils.log
-import org.ossreviewtoolkit.utils.perf
 
 const val TOOL_NAME = "scanner"
 
@@ -68,28 +61,16 @@ abstract class Scanner(
     }
 
     /**
-     * Return the scanner-specific SPDX LicenseRef for the given [license].
-     */
-    fun getSpdxLicenseRef(license: String) =
-        SpdxLicense.forId(license)?.id ?: "${SpdxConstants.LICENSE_REF_PREFIX}$scannerName-$license"
-
-    /**
-     * Scan the [Project]s and [Package]s specified in [ortFile] and store the scan results in [outputDirectory].
+     * Scan the [Project]s and [Package]s specified in [ortResult] and store the scan results in [outputDirectory].
      * Return scan results as an [OrtResult].
      */
-    fun scanOrtResult(ortFile: File, outputDirectory: File, skipExcluded: Boolean = false): OrtResult {
+    fun scanOrtResult(ortResult: OrtResult, outputDirectory: File, skipExcluded: Boolean = false): OrtResult {
         val startTime = Instant.now()
-
-        val (ortResult, duration) = measureTimedValue { ortFile.readValue<OrtResult>() }
-
-        log.perf {
-            "Read ORT result from '${ortFile.name}' (${ortFile.formatSizeInMib}) in ${duration.inMilliseconds}ms."
-        }
 
         if (ortResult.analyzer == null) {
             log.warn {
-                "Cannot run the scanner as the provided ORT result file '${ortFile.canonicalPath}' does not contain " +
-                        "an analyzer result. No result will be added."
+                "Cannot run the scanner as the provided ORT result does not contain an analyzer result. " +
+                        "No result will be added."
             }
 
             return ortResult

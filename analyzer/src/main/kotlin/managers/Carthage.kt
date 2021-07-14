@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -41,6 +41,7 @@ import org.ossreviewtoolkit.model.VcsType
 import org.ossreviewtoolkit.model.config.AnalyzerConfiguration
 import org.ossreviewtoolkit.model.config.RepositoryConfiguration
 import org.ossreviewtoolkit.model.jsonMapper
+import org.ossreviewtoolkit.model.orEmpty
 import org.ossreviewtoolkit.utils.normalizeVcsUrl
 
 /**
@@ -97,7 +98,7 @@ class Carthage(
      */
     private fun getProjectInfoFromVcs(workingDir: File): ProjectInfo {
         val workingTree = VersionControlSystem.forDirectory(workingDir)
-        val vcsInfo = workingTree?.getInfo() ?: VcsInfo.EMPTY
+        val vcsInfo = workingTree?.getInfo().orEmpty()
         val normalizedVcsUrl = normalizeVcsUrl(vcsInfo.url)
         val vcsHost = VcsHost.toVcsHost(URI(normalizedVcsUrl))
 
@@ -129,7 +130,7 @@ class Carthage(
             "A dependency line must consist of exactly 3 space separated elements."
         }
 
-        val type = DependencyType.valueOf(split[0].toUpperCase())
+        val type = DependencyType.valueOf(split[0].uppercase())
         val id = split[1].removeSurrounding("\"")
         val revision = split[2].removeSurrounding("\"")
 

@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -70,7 +70,6 @@ class PackageCurationTest : WordSpec({
                         type = VcsType.GIT,
                         url = "http://url.git",
                         revision = "revision",
-                        resolvedRevision = "resolvedRevision",
                         path = "path"
                     ),
                     isMetaDataOnly = true,
@@ -119,7 +118,6 @@ class PackageCurationTest : WordSpec({
                     type = VcsType.GIT,
                     url = "http://url.git",
                     revision = "revision",
-                    resolvedRevision = "resolvedRevision",
                     path = "path"
                 ),
                 isMetaDataOnly = false,
@@ -151,7 +149,6 @@ class PackageCurationTest : WordSpec({
                     type = pkg.vcs.type,
                     url = curation.data.vcs!!.url!!,
                     revision = pkg.vcs.revision,
-                    resolvedRevision = pkg.vcs.resolvedRevision,
                     path = pkg.vcs.path
                 )
                 isMetaDataOnly shouldBe false

@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -116,7 +116,7 @@ class VulnerableCode(
      */
     private fun VulnerableCodeService.VulnerabilityReference.toModel(): List<VulnerabilityReference> {
         val sourceUri = URI(url)
-        return scores.map { VulnerabilityReference(sourceUri, it.scoringSystem, it.value) }.takeUnless { it.isEmpty() }
-            ?: listOf(VulnerabilityReference(sourceUri, null, null))
+        if (scores.isEmpty()) return listOf(VulnerabilityReference(sourceUri, null, null))
+        return scores.map { VulnerabilityReference(sourceUri, it.scoringSystem, it.value) }
     }
 }

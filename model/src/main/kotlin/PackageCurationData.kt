@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -115,7 +115,6 @@ private fun applyCurationToPackage(targetPackage: CuratedPackage, curation: Pack
             type = it.type ?: base.vcs.type,
             url = it.url ?: base.vcs.url,
             revision = it.revision ?: base.vcs.revision,
-            resolvedRevision = it.resolvedRevision ?: base.vcs.resolvedRevision,
             path = it.path ?: base.vcs.path
         )
     } ?: base.vcs

@@ -6,7 +6,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -50,7 +50,7 @@ data class LicenseKeyReplacement(
     val spdxExpression: String
 )
 
-private val LICENSE_REF_PREFIX_SCAN_CODE = "$LICENSE_REF_PREFIX${ScanCode.SCANNER_NAME.toLowerCase()}-"
+private val LICENSE_REF_PREFIX_SCAN_CODE = "$LICENSE_REF_PREFIX${ScanCode.SCANNER_NAME.lowercase()}-"
 
 // Note: The "(File: ...)" part in the patterns below is actually added by our own getRawResult() function.
 private val UNKNOWN_ERROR_REGEX = Pattern.compile(
@@ -105,27 +105,11 @@ internal fun generateSummary(
     ScanSummary(
         startTime = startTime,
         endTime = endTime,
-        fileCount = getFileCount(result),
         packageVerificationCode = verificationCode,
         licenseFindings = getLicenseFindings(result, parseExpressions).toSortedSet(),
         copyrightFindings = getCopyrightFindings(result).toSortedSet(),
         issues = getIssues(result)
     )
-
-/**
- * Get the number of files that have been scanned.
- */
-private fun getFileCount(result: JsonNode): Int {
-    // ScanCode 2.9.8 and above nest the files count in an extra header.
-    result["headers"]?.forEach { header ->
-        header["extra_data"]?.get("files_count")?.let {
-            return it.intValue()
-        }
-    }
-
-    // ScanCode 2.9.7 and below contain the files count at the top level.
-    return result["files_count"]?.intValue() ?: 0
-}
 
 /**
  * Generate an object with details about the ScanCode scanner that produced the given [result]. The corresponding

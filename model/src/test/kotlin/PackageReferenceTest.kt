@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -82,6 +82,14 @@ class PackageReferenceTest : WordSpec() {
                     it.issues.first().message shouldBe "issue ${it.id.name}"
                     it
                 }
+            }
+        }
+
+        "visitNodes" should {
+            "invoke the code block on the child dependencies" {
+                val children = root.visitDependencies { it.toList() }
+
+                children should containExactly(node1, node2, node3)
             }
         }
     }

@@ -22,31 +22,31 @@
   } ],
   "licenses" : [ {
     "_id" : 0,
-    "id" : "GPL-2.0-only WITH Classpath-exception-2.0"
-  }, {
-    "_id" : 1,
-    "id" : "BSD-3-Clause"
-  }, {
-    "_id" : 2,
-    "id" : "MIT"
-  }, {
-    "_id" : 3,
-    "id" : "LicenseRef-test-Apache-2.0-multi-line"
-  }, {
-    "_id" : 4,
-    "id" : "LicenseRef-test-Apache-2.0-single-line"
-  }, {
-    "_id" : 5,
     "id" : "GPL-3.0-only WITH GCC-exception-3.1 AND CC-BY-NC-3.0"
   }, {
-    "_id" : 6,
+    "_id" : 1,
     "id" : "GPL-3.0-only WITH GCC-exception-3.1"
   }, {
-    "_id" : 7,
+    "_id" : 2,
     "id" : "CC-BY-NC-3.0"
   }, {
-    "_id" : 8,
+    "_id" : 3,
     "id" : "Apache-2.0"
+  }, {
+    "_id" : 4,
+    "id" : "MIT"
+  }, {
+    "_id" : 5,
+    "id" : "GPL-2.0-only WITH Classpath-exception-2.0"
+  }, {
+    "_id" : 6,
+    "id" : "BSD-3-Clause"
+  }, {
+    "_id" : 7,
+    "id" : "LicenseRef-test-Apache-2.0-multi-line"
+  }, {
+    "_id" : 8,
+    "id" : "LicenseRef-test-Apache-2.0-single-line"
   }, {
     "_id" : 9,
     "id" : "Eclipse Public License 1.0"
@@ -85,7 +85,7 @@
     "_id" : 0,
     "timestamp" : "1970-01-01T00:00:00Z",
     "type" : "SCANNER",
-    "source" : "FileCounter",
+    "source" : "Dummy",
     "message" : "DownloadException: No source artifact URL provided for 'Gradle:org.ossreviewtoolkit.gradle.example:lib:1.0.0'.\nCaused by: DownloadException: No VCS URL provided for 'Gradle:org.ossreviewtoolkit.gradle.example:lib:1.0.0'. Please make sure the published POM file includes the SCM connection, see: https://docs.gradle.org/current/userguide/publishing_maven.html#sec:modifying_the_generated_pom",
     "severity" : "ERROR",
     "pkg" : 0,
@@ -99,9 +99,9 @@
         "type" : "Git",
         "url" : "https://github.com/oss-review-toolkit/ort.git",
         "revision" : "master",
-        "resolved_revision" : "3dcca3e6ee0dea120922f90495bf04b4e09ae455",
         "path" : "analyzer/src/funTest/assets/projects/synthetic/gradle/lib"
-      }
+      },
+      "resolved_revision" : "3dcca3e6ee0dea120922f90495bf04b4e09ae455"
     },
     "scanner" : {
       "name" : "FakeScanner",
@@ -110,7 +110,6 @@
     },
     "start_time" : "1970-01-01T00:00:00Z",
     "end_time" : "1970-01-01T00:00:00Z",
-    "file_count" : 0,
     "package_verification_code" : "0000000000000000000000000000000000000000",
     "issues" : [ 0 ]
   }, {
@@ -120,9 +119,9 @@
         "type" : "Git",
         "url" : "https://example.com/git",
         "revision" : "master",
-        "resolved_revision" : "0000000000000000000000000000000000000000",
         "path" : "project"
-      }
+      },
+      "resolved_revision" : "0000000000000000000000000000000000000000"
     },
     "scanner" : {
       "name" : "FakeScanner",
@@ -131,7 +130,6 @@
     },
     "start_time" : "1970-01-01T00:00:00Z",
     "end_time" : "1970-01-01T00:00:00Z",
-    "file_count" : 0,
     "package_verification_code" : "0000000000000000000000000000000000000000"
   }, {
     "_id" : 2,
@@ -145,13 +143,12 @@
       }
     },
     "scanner" : {
-      "name" : "FileCounter",
+      "name" : "Dummy",
       "version" : "1.0",
       "configuration" : ""
     },
     "start_time" : "1970-01-01T00:00:00Z",
     "end_time" : "1970-01-01T00:00:00Z",
-    "file_count" : 234,
     "package_verification_code" : "0000000000000000000000000000000000000000"
   }, {
     "_id" : 3,
@@ -165,13 +162,12 @@
       }
     },
     "scanner" : {
-      "name" : "FileCounter",
+      "name" : "Dummy",
       "version" : "1.0",
       "configuration" : ""
     },
     "start_time" : "1970-01-01T00:00:00Z",
     "end_time" : "1970-01-01T00:00:00Z",
-    "file_count" : 42,
     "package_verification_code" : "0000000000000000000000000000000000000000"
   }, {
     "_id" : 4,
@@ -185,13 +181,12 @@
       }
     },
     "scanner" : {
-      "name" : "FileCounter",
+      "name" : "Dummy",
       "version" : "1.0",
       "configuration" : ""
     },
     "start_time" : "1970-01-01T00:00:00Z",
     "end_time" : "1970-01-01T00:00:00Z",
-    "file_count" : 168,
     "package_verification_code" : "0000000000000000000000000000000000000000"
   }, {
     "_id" : 5,
@@ -205,13 +200,12 @@
       }
     },
     "scanner" : {
-      "name" : "FileCounter",
+      "name" : "Dummy",
       "version" : "1.0",
       "configuration" : ""
     },
     "start_time" : "1970-01-01T00:00:00Z",
     "end_time" : "1970-01-01T00:00:00Z",
-    "file_count" : 80,
     "package_verification_code" : "0000000000000000000000000000000000000000"
   }, {
     "_id" : 6,
@@ -225,13 +219,12 @@
       }
     },
     "scanner" : {
-      "name" : "FileCounter",
+      "name" : "Dummy",
       "version" : "1.0",
       "configuration" : ""
     },
     "start_time" : "1970-01-01T00:00:00Z",
     "end_time" : "1970-01-01T00:00:00Z",
-    "file_count" : 47,
     "package_verification_code" : "0000000000000000000000000000000000000000"
   } ],
   "packages" : [ {
@@ -240,7 +233,7 @@
     "is_project" : true,
     "definition_file_path" : "analyzer/src/funTest/assets/projects/synthetic/gradle/lib/build.gradle",
     "declared_licenses_processed" : { },
-    "detected_licenses" : [ 0, 1, 2, 3, 4 ],
+    "detected_licenses" : [ 5, 6, 4, 7, 8 ],
     "binary_artifact" : {
       "url" : "",
       "hash" : {
@@ -272,21 +265,21 @@
     "scan_results" : [ 0 ],
     "findings" : [ {
       "type" : "LICENSE",
-      "license" : 0,
+      "license" : 5,
       "path" : "analyzer/src/funTest/assets/projects/synthetic/gradle/lib/src/code.cpp",
       "start_line" : 1,
       "end_line" : 1,
       "scan_result" : 0
     }, {
       "type" : "LICENSE",
-      "license" : 1,
+      "license" : 6,
       "path" : "analyzer/src/funTest/assets/projects/synthetic/gradle/lib/src/code.cpp",
       "start_line" : 1,
       "end_line" : 1,
       "scan_result" : 0
     }, {
       "type" : "LICENSE",
-      "license" : 2,
+      "license" : 4,
       "path" : "analyzer/src/funTest/assets/projects/synthetic/gradle/lib/src/code.cpp",
       "start_line" : 1,
       "end_line" : 1,
@@ -300,7 +293,7 @@
       "scan_result" : 0
     }, {
       "type" : "LICENSE",
-      "license" : 3,
+      "license" : 7,
       "path" : "analyzer/src/funTest/assets/projects/synthetic/gradle/lib/build.gradle",
       "start_line" : 19,
       "end_line" : 20,
@@ -314,14 +307,14 @@
       "scan_result" : 0
     }, {
       "type" : "LICENSE",
-      "license" : 4,
+      "license" : 8,
       "path" : "analyzer/src/funTest/assets/projects/synthetic/gradle/lib/build.gradle",
       "start_line" : 19,
       "end_line" : 19,
       "scan_result" : 0
     }, {
       "type" : "LICENSE",
-      "license" : 4,
+      "license" : 8,
       "path" : "analyzer/src/funTest/assets/projects/synthetic/gradle/lib/build.gradle",
       "start_line" : 20,
       "end_line" : 20,
@@ -333,13 +326,13 @@
     "id" : "Gradle:org.ossreviewtoolkit:nested-fake-project:1.0.0",
     "is_project" : true,
     "definition_file_path" : "project/build.gradle",
-    "declared_licenses" : [ 5 ],
+    "declared_licenses" : [ 0 ],
     "declared_licenses_processed" : {
       "spdx_expression" : "GPL-3.0-only WITH GCC-exception-3.1 AND CC-BY-NC-3.0",
-      "mapped_licenses" : [ 6, 7 ]
+      "mapped_licenses" : [ 1, 2 ]
     },
-    "detected_licenses" : [ 8, 2 ],
-    "detected_excluded_licenses" : [ 2 ],
+    "detected_licenses" : [ 3, 4 ],
+    "detected_excluded_licenses" : [ 4 ],
     "binary_artifact" : {
       "url" : "",
       "hash" : {
@@ -379,7 +372,7 @@
       "path_excludes" : [ 1 ]
     }, {
       "type" : "LICENSE",
-      "license" : 8,
+      "license" : 3,
       "path" : "file.java",
       "start_line" : 1,
       "end_line" : 2,
@@ -387,7 +380,7 @@
       "path_excludes" : [ 1 ]
     }, {
       "type" : "LICENSE",
-      "license" : 8,
+      "license" : 3,
       "path" : "file.kt",
       "start_line" : 1,
       "end_line" : 2,
@@ -402,7 +395,7 @@
       "path_excludes" : [ 1 ]
     }, {
       "type" : "LICENSE",
-      "license" : 2,
+      "license" : 4,
       "path" : "file1.java",
       "start_line" : 1,
       "end_line" : 2,
@@ -410,7 +403,7 @@
       "path_excludes" : [ 1 ]
     }, {
       "type" : "LICENSE",
-      "license" : 2,
+      "license" : 4,
       "path" : "file2.java",
       "start_line" : 1,
       "end_line" : 2,
@@ -424,7 +417,7 @@
     "id" : "Ant:junit:junit:4.12",
     "is_project" : false,
     "definition_file_path" : "",
-    "purl" : "pkg:ant/junit/junit@4.12",
+    "purl" : "pkg:maven/junit/junit@4.12",
     "declared_licenses" : [ 9 ],
     "declared_licenses_processed" : {
       "spdx_expression" : "EPL-1.0",
@@ -473,7 +466,7 @@
     "declared_licenses" : [ 11 ],
     "declared_licenses_processed" : {
       "spdx_expression" : "GPL-2.0-only OR MIT",
-      "mapped_licenses" : [ 12, 2 ]
+      "mapped_licenses" : [ 12, 4 ]
     },
     "concluded_license" : "GPL-2.0-only OR MIT",
     "binary_artifact" : {
@@ -576,7 +569,7 @@
     "declared_licenses" : [ 15 ],
     "declared_licenses_processed" : {
       "spdx_expression" : "Apache-2.0",
-      "mapped_licenses" : [ 8 ]
+      "mapped_licenses" : [ 3 ]
     },
     "description" : "Apache Commons Lang, a package of Java utility classes for the\n  classes that are in java.lang's hierarchy, or are considered to be so\n  standard as to justify existence in java.lang.",
     "homepage_url" : "http://commons.apache.org/proper/commons-lang/",
@@ -620,7 +613,7 @@
     "declared_licenses" : [ 15 ],
     "declared_licenses_processed" : {
       "spdx_expression" : "Apache-2.0",
-      "mapped_licenses" : [ 8 ]
+      "mapped_licenses" : [ 3 ]
     },
     "description" : "Apache Commons Text is a library focused on algorithms working on strings.",
     "homepage_url" : "http://commons.apache.org/proper/commons-text/",
@@ -664,7 +657,7 @@
     "declared_licenses" : [ 16 ],
     "declared_licenses_processed" : {
       "spdx_expression" : "BSD-3-Clause",
-      "mapped_licenses" : [ 1 ]
+      "mapped_licenses" : [ 6 ]
     },
     "description" : "This is the core API of hamcrest matcher framework to be used by third-party framework providers. This includes the a foundation set of matcher implementations for common operations.",
     "homepage_url" : "https://github.com/hamcrest/JavaHamcrest/hamcrest-core",
@@ -752,56 +745,56 @@
   } ],
   "dependency_trees" : [ {
     "key" : 0,
+    "pkg" : 1,
+    "path_excludes" : [ 0 ]
+  }, {
+    "key" : 1,
     "pkg" : 0,
     "children" : [ {
-      "key" : 1,
+      "key" : 2,
       "scope" : 0,
       "children" : [ {
-        "key" : 2,
+        "key" : 3,
         "linkage" : "DYNAMIC",
         "pkg" : 6,
         "children" : [ {
-          "key" : 3,
+          "key" : 4,
           "linkage" : "DYNAMIC",
           "pkg" : 5
         } ]
       } ]
     }, {
-      "key" : 4,
+      "key" : 5,
       "scope" : 1,
       "scope_excludes" : [ 0 ],
       "children" : [ {
-        "key" : 5,
+        "key" : 6,
         "linkage" : "DYNAMIC",
         "pkg" : 2,
         "children" : [ {
-          "key" : 6,
+          "key" : 7,
           "linkage" : "DYNAMIC",
           "pkg" : 3
         }, {
-          "key" : 7,
+          "key" : 8,
           "linkage" : "DYNAMIC",
           "pkg" : 4
         }, {
-          "key" : 8,
+          "key" : 9,
           "linkage" : "DYNAMIC",
           "pkg" : 7
         } ]
       }, {
-        "key" : 9,
+        "key" : 10,
         "linkage" : "DYNAMIC",
         "pkg" : 6,
         "children" : [ {
-          "key" : 10,
+          "key" : 11,
           "linkage" : "DYNAMIC",
           "pkg" : 5
         } ]
       } ]
     } ]
-  }, {
-    "key" : 11,
-    "pkg" : 1,
-    "path_excludes" : [ 0 ]
   } ],
   "rule_violation_resolutions" : [ {
     "_id" : 0,
@@ -822,7 +815,7 @@
     "_id" : 1,
     "rule" : "rule 2",
     "pkg" : 6,
-    "license" : 8,
+    "license" : 3,
     "license_source" : "DECLARED",
     "severity" : "HINT",
     "message" : "Apache-2.0 hint",
@@ -832,7 +825,7 @@
     "_id" : 2,
     "rule" : "rule 3",
     "pkg" : 7,
-    "license" : 1,
+    "license" : 6,
     "license_source" : "CONCLUDED",
     "severity" : "WARNING",
     "message" : "BSD-3-Clause warning",
@@ -931,5 +924,8 @@
     "process_parameters.PROCESS_PARAM_1" : "label process param 1",
     "process_parameters.PROCESS_PARAM_2" : "label process param 2",
     "OTHER" : "label other"
+  },
+  "meta_data" : {
+    "analyzer_start_time" : "1970-01-01T00:00:00Z"
   }
 }

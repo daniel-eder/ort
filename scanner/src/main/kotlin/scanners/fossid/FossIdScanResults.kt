@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -33,14 +33,14 @@ import org.ossreviewtoolkit.model.TextLocation
 internal data class RawResults(
     val identifiedFiles: List<IdentifiedFile>,
     val markedAsIdentifiedFiles: List<MarkedAsIdentifiedFile>,
-    val listIgnoredFiles: List<IgnoredFile>
+    val listIgnoredFiles: List<IgnoredFile>,
+    val listPendingFiles: List<String>
 )
 
 /**
  * A simple Triple data class to hold FossId mapped results.
  */
 internal data class FindingsContainer(
-    val filesCount: Int,
     val licenseFindings: MutableList<LicenseFinding>,
     val copyrightFindings: MutableList<CopyrightFinding>
 )
@@ -70,7 +70,6 @@ internal fun <T : Summarizable> List<T>.mapSummary(ignoredFiles: Map<String, Ign
     }
 
     return FindingsContainer(
-        filesCount = files.size,
         licenseFindings = licenseFindings,
         copyrightFindings = copyrightFindings
     )

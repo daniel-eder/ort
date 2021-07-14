@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,14 +19,15 @@
 
 package org.ossreviewtoolkit.helper.commands.packageconfig
 
-import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.core.NoOpCliktCommand
 import com.github.ajalt.clikt.core.subcommands
 
-internal class PackageConfigurationCommand : CliktCommand(
+internal class PackageConfigurationCommand : NoOpCliktCommand(
     help = "Commands for working with package configurations."
 ) {
     init {
         subcommands(
+            CreateCommand(),
             FindCommand(),
             FormatCommand(),
             ExportLicenseFindingCurationsCommand(),
@@ -36,9 +37,5 @@ internal class PackageConfigurationCommand : CliktCommand(
             SortCommand(),
             RemoveEntriesCommand()
         )
-    }
-
-    override fun run() {
-        // Intentionally empty, because all logic is implemented inside the sub commands..
     }
 }

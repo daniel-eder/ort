@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -72,5 +72,10 @@ data class Excludes(
     /**
      * True if the [scope] is excluded by this [Excludes] configuration.
      */
-    fun isScopeExcluded(scope: Scope): Boolean = findScopeExcludes(scope).isNotEmpty()
+    fun isScopeExcluded(scope: Scope): Boolean = isScopeExcluded(scope.name)
+
+    /**
+     * True if the scope with the given [scopeName] is excluded by this [Excludes] configuration.
+     */
+    fun isScopeExcluded(scopeName: String): Boolean = findScopeExcludes(scopeName).isNotEmpty()
 }

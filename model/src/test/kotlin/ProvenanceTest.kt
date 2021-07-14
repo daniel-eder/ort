@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -87,15 +87,9 @@ class ProvenanceTest : WordSpec({
                 type = VcsType.UNKNOWN,
                 url = "url",
                 revision = "revision",
-                resolvedRevision = "resolvedRevision",
                 path = "path"
             ),
-            originalVcsInfo = VcsInfo(
-                type = VcsType.UNKNOWN,
-                url = "originalUrl",
-                revision = "originalRevision",
-                path = "originalPath"
-            )
+            resolvedRevision = "resolvedRevision"
         )
 
         val json = jsonMapper.writerWithDefaultPrettyPrinter().writeValueAsString(provenance)
@@ -107,15 +101,9 @@ class ProvenanceTest : WordSpec({
                     "type" : "",
                     "url" : "url",
                     "revision" : "revision",
-                    "resolved_revision" : "resolvedRevision",
                     "path" : "path"
                   },
-                  "original_vcs_info" : {
-                    "type" : "",
-                    "url" : "originalUrl",
-                    "revision" : "originalRevision",
-                    "path" : "originalPath"
-                  }
+                  "resolved_revision" : "resolvedRevision"
                 }
             """.trimIndent()
         }

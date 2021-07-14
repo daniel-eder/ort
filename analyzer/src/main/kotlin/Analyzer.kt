@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *     https://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -32,12 +32,11 @@ import org.ossreviewtoolkit.model.AnalyzerResult
 import org.ossreviewtoolkit.model.AnalyzerRun
 import org.ossreviewtoolkit.model.OrtResult
 import org.ossreviewtoolkit.model.Repository
-import org.ossreviewtoolkit.model.VcsInfo
 import org.ossreviewtoolkit.model.config.AnalyzerConfiguration
 import org.ossreviewtoolkit.model.config.RepositoryConfiguration
-import org.ossreviewtoolkit.model.readValue
+import org.ossreviewtoolkit.model.orEmpty
+import org.ossreviewtoolkit.utils.CommandLineTool
 import org.ossreviewtoolkit.utils.Environment
-import org.ossreviewtoolkit.utils.ORT_REPO_CONFIG_FILENAME
 import org.ossreviewtoolkit.utils.log
 
 /**
@@ -48,22 +47,11 @@ class Analyzer(private val config: AnalyzerConfiguration) {
         absoluteProjectPath: File,
         packageManagers: List<PackageManagerFactory> = PackageManager.ALL,
         curationProvider: PackageCurationProvider = PackageCurationProvider.EMPTY,
-        repositoryConfigurationFile: File? = null
+        repositoryConfiguration: RepositoryConfiguration = RepositoryConfiguration()
     ): OrtResult {
         require(absoluteProjectPath.isAbsolute)
 
         val startTime = Instant.now()
-
-        val actualRepositoryConfigurationFile = repositoryConfigurationFile
-            ?: absoluteProjectPath.resolve(ORT_REPO_CONFIG_FILENAME)
-
-        val repositoryConfiguration = if (actualRepositoryConfigurationFile.isFile) {
-            log.info { "Using configuration file '${actualRepositoryConfigurationFile.absolutePath}'." }
-
-            actualRepositoryConfigurationFile.readValue()
-        } else {
-            RepositoryConfiguration()
-        }
 
         log.debug { "Using the following configuration settings:\n$repositoryConfiguration" }
 
@@ -109,7 +97,7 @@ class Analyzer(private val config: AnalyzerConfiguration) {
         val analyzerResult = analyzeInParallel(managedFiles, curationProvider)
 
         val workingTree = VersionControlSystem.forDirectory(absoluteProjectPath)
-        val vcs = workingTree?.getInfo() ?: VcsInfo.EMPTY
+        val vcs = workingTree?.getInfo().orEmpty()
         val nestedVcs = workingTree?.getNested()?.filter { (path, _) ->
             // Only include nested VCS if they are part of the analyzed directory.
             workingTree.getRootPath().resolve(path).startsWith(absoluteProjectPath)
@@ -118,7 +106,15 @@ class Analyzer(private val config: AnalyzerConfiguration) {
 
         val endTime = Instant.now()
 
-        val run = AnalyzerRun(startTime, endTime, Environment(), config, analyzerResult)
+        val toolVersions = mutableMapOf<String, String>()
+
+        managedFiles.keys.forEach { manager ->
+            if (manager is CommandLineTool) {
+                toolVersions[manager.managerName] = manager.getVersion()
+            }
+        }
+
+        val run = AnalyzerRun(startTime, endTime, Environment(toolVersions = toolVersions), config, analyzerResult)
 
         return OrtResult(repository, run)
     }
@@ -135,17 +131,22 @@ class Analyzer(private val config: AnalyzerConfiguration) {
                     val results = manager.resolveDependencies(files)
 
                     // By convention, project ids must be of the type of the respective package manager.
-                    results.onEach { (_, result) ->
+                    results.projectResults.forEach { (_, result) ->
                         val invalidProjects = result.filter { it.project.id.type != manager.managerName }
                         require(invalidProjects.isEmpty()) {
                             val projectString = invalidProjects.joinToString { "'${it.project.id.toCoordinates()}'" }
                             "Projects $projectString must be of type '${manager.managerName}'."
                         }
                     }
+
+                    manager to results
                 }
-            }.forEach { resolutionResult ->
-                resolutionResult.await().forEach { (_, analyzerResults) ->
-                    analyzerResults.forEach { analyzerResultBuilder.addResult(it) }
+            }.forEach { deferredResult ->
+                val (manager, managerResult) = deferredResult.await()
+                managerResult.projectResults.values.flatten().forEach { analyzerResultBuilder.addResult(it) }
+                managerResult.dependencyGraph?.let {
+                    analyzerResultBuilder.addDependencyGraph(manager.managerName, it)
+                        .addPackages(managerResult.sharedPackages)
                 }
             }
         }
