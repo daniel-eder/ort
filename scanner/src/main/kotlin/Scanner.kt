@@ -19,7 +19,6 @@
 
 package org.ossreviewtoolkit.scanner
 
-import java.io.File
 import java.lang.IllegalArgumentException
 import java.time.Instant
 import java.util.ServiceLoader
@@ -33,6 +32,7 @@ import org.ossreviewtoolkit.model.Package
 import org.ossreviewtoolkit.model.Project
 import org.ossreviewtoolkit.model.ScanRecord
 import org.ossreviewtoolkit.model.ScanResult
+import org.ossreviewtoolkit.model.ScannerDetails
 import org.ossreviewtoolkit.model.ScannerRun
 import org.ossreviewtoolkit.model.config.DownloaderConfiguration
 import org.ossreviewtoolkit.model.config.ScannerConfiguration
@@ -55,38 +55,32 @@ private fun removeConcludedPackages(packages: Set<Package>, scanner: Scanner): S
         }
 
 /**
- * Use the [scanner] to scan the [Project]s and [Package]s specified in the [ortResult]. Scan results are stored in the
- * [outputDirectory]. If [skipExcluded] is true, packages for which excludes are defined are not scanned. Return scan
- * results as an [OrtResult].
+ * Use the [scanner] to scan the [Project]s and [Package]s specified in the [ortResult].  If [skipExcluded] is true,
+ * packages for which excludes are defined are not scanned. Return scan results as an [OrtResult].
  */
 @JvmOverloads
 fun scanOrtResult(
     scanner: Scanner,
     ortResult: OrtResult,
-    outputDirectory: File,
     skipExcluded: Boolean = false
-) = scanOrtResult(scanner, scanner, ortResult, outputDirectory, skipExcluded)
+) = scanOrtResult(scanner, scanner, ortResult, skipExcluded)
 
 /**
  * Use the [packageScanner] and / or [projectScanner] to scan the [Package]s and [Project]s specified in the
  * [ortResult]. If specified, scanners are expected to refer to the same global scanner configuration. If a scanner is
- * null, scanning of the respective entities is skipped. Scan results are stored in the [outputDirectory]. If
- * [skipExcluded] is true, packages for which excludes are defined are not scanned. Return scan results as an
- * [OrtResult].
+ * null, scanning of the respective entities is skipped. If [skipExcluded] is true, packages for which excludes are
+ * defined are not scanned. Return scan results as an [OrtResult].
  */
 @JvmOverloads
 fun scanOrtResult(
     packageScanner: Scanner?,
     projectScanner: Scanner?,
     ortResult: OrtResult,
-    outputDirectory: File,
     skipExcluded: Boolean = false
 ): OrtResult {
     require(packageScanner != null || projectScanner != null) {
         "At least one scanner must be specified."
     }
-
-    val startTime = Instant.now()
 
     if (ortResult.analyzer == null) {
         Scanner.log.warn {
@@ -96,6 +90,8 @@ fun scanOrtResult(
 
         return ortResult
     }
+
+    val startTime = Instant.now()
 
     // Determine the projects to scan as packages.
     val consolidatedProjects = consolidateProjectPackagesByVcs(ortResult.getProjects(skipExcluded))
@@ -114,8 +110,7 @@ fun scanOrtResult(
                 val filteredProjectPackages = removeConcludedPackages(projectPackages, projectScanner)
 
                 if (filteredProjectPackages.isEmpty()) emptyMap()
-                else projectScanner.scanPackages(filteredProjectPackages, outputDirectory, ortResult.labels)
-                    .mapKeys { it.key.id }
+                else projectScanner.scanPackages(filteredProjectPackages, ortResult.labels).mapKeys { it.key.id }
             }
         }
 
@@ -126,8 +121,7 @@ fun scanOrtResult(
                 val filteredPackages = removeConcludedPackages(packages.toSet(), packageScanner)
 
                 if (filteredPackages.isEmpty()) emptyMap()
-                else packageScanner.scanPackages(filteredPackages, outputDirectory, ortResult.labels)
-                    .mapKeys { it.key.id }
+                else packageScanner.scanPackages(filteredPackages, ortResult.labels).mapKeys { it.key.id }
             }
         }
 
@@ -154,8 +148,6 @@ fun scanOrtResult(
         }
     }
 
-    val scanRecord = ScanRecord(scanResults, ScanResultsStorage.storage.stats)
-
     val endTime = Instant.now()
 
     // Note: Currently, each scanner gets its own reference to the whole scanner configuration, which includes the
@@ -167,24 +159,30 @@ fun scanOrtResult(
     val filteredScannerOptions = mutableMapOf<String, ScannerOptions>()
 
     packageScanner?.scannerConfig?.options?.get(packageScanner.scannerName)?.let { packageScannerOptions ->
-        val filteredPackageScannerOptions = packageScanner.filterOptionsForResult(packageScannerOptions)
+        val filteredPackageScannerOptions = packageScanner.filterSecretOptions(packageScannerOptions)
         filteredScannerOptions[packageScanner.scannerName] = filteredPackageScannerOptions
     }
 
     if (projectScanner != packageScanner) {
         projectScanner?.scannerConfig?.options?.get(projectScanner.scannerName)?.let { projectScannerOptions ->
-            val filteredProjectScannerOptions = projectScanner.filterOptionsForResult(projectScannerOptions)
+            val filteredProjectScannerOptions = projectScanner.filterSecretOptions(projectScannerOptions)
             filteredScannerOptions[projectScanner.scannerName] = filteredProjectScannerOptions
         }
     }
 
     // Only include options of used scanners into the scanner run.
-    val scannerConfig = packageScanner?.scannerConfig ?: packageScanner?.scannerConfig
+    val scannerConfig = packageScanner?.scannerConfig ?: projectScanner?.scannerConfig
     checkNotNull(scannerConfig)
 
     val configWithFilteredOptions = scannerConfig.copy(
         options = filteredScannerOptions.takeUnless { it.isEmpty() }
     )
+
+    val filteredScanResults = scanResults.mapValues { (_, results) ->
+        results.map { it.filterByIgnorePatterns(scannerConfig.ignorePatterns) }
+    }.toSortedMap()
+
+    val scanRecord = ScanRecord(filteredScanResults, ScanResultsStorage.storage.stats)
 
     // Note: This overwrites any existing ScannerRun from the input file.
     val scannerRun = ScannerRun(startTime, endTime, Environment(), configWithFilteredOptions, scanRecord)
@@ -204,27 +202,42 @@ abstract class Scanner(
         private val LOADER = ServiceLoader.load(ScannerFactory::class.java)!!
 
         /**
-         * The list of all available scanners in the classpath.
+         * The set of all available [scanner factories][ScannerFactory] in the classpath, sorted by name.
          */
-        val ALL by lazy { LOADER.iterator().asSequence().toList().sortedBy { it.scannerName } }
+        val ALL: Set<ScannerFactory> by lazy {
+            LOADER.iterator().asSequence().toSortedSet(compareBy { it.scannerName })
+        }
     }
 
     /**
-     * Scan the [packages] and store the scan results in [outputDirectory]. [ScanResult]s are returned associated by
-     * [Package]. The map may contain multiple results for the same [Package] if the storage contains more than one
-     * result for the specification of this scanner.
-     * [labels] are the labels present in [OrtResult.labels], created by previous invocations of ORT tools. They can be
-     * used by scanner implementations to decide if and how packages are scanned.
+     * The version of the scanner, or an empty string if not applicable.
+     */
+    abstract val version: String
+
+    /**
+     * The configuration used by the scanner (this could be anything from command line options to a URL with query
+     * parameters), or an empty string if not applicable.
+     */
+    abstract val configuration: String
+
+    /**
+     * Return the [ScannerDetails] of this scanner.
+     */
+    val details by lazy { ScannerDetails(scannerName, version, configuration) }
+
+    /**
+     * Scan the [packages] and return a map of [ScanResult]s associated by their [Package]. The map may contain multiple
+     * results for the same [Package] if the storage contains more than one result for the specification of this
+     * scanner. [labels] are the labels present in [OrtResult.labels], created by previous invocations of ORT tools.
+     * They can be used by scanner implementations to decide if and how packages are scanned.
      */
     abstract suspend fun scanPackages(
         packages: Set<Package>,
-        outputDirectory: File,
         labels: Map<String, String>
     ): Map<Package, List<ScanResult>>
 
     /**
-     * Filter the options specific to this scanner that will be included into the result, e.g. to perform obfuscation of
-     * credentials.
+     * Filter the scanner-specific options to remove / obfuscate any secrets, like credentials.
      */
-    open fun filterOptionsForResult(options: ScannerOptions) = options
+    open fun filterSecretOptions(options: ScannerOptions) = options
 }

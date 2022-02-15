@@ -26,7 +26,6 @@ import io.kotest.matchers.nulls.beNull
 import io.kotest.matchers.should
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNot
-import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.beBlank
 import io.kotest.matchers.string.endWith
 import io.kotest.matchers.string.startWith
@@ -34,12 +33,13 @@ import io.kotest.matchers.string.startWith
 import java.io.File
 
 import org.ossreviewtoolkit.utils.common.VCS_DIRECTORIES
+import org.ossreviewtoolkit.utils.spdx.SpdxConstants.EMPTY_PACKAGE_VERIFICATION_CODE
 import org.ossreviewtoolkit.utils.test.createTestTempDir
 
 class UtilsTest : WordSpec() {
     private lateinit var tempDir: File
 
-    override fun beforeTest(testCase: TestCase) {
+    override fun beforeEach(testCase: TestCase) {
         tempDir = createTestTempDir()
     }
 
@@ -48,6 +48,10 @@ class UtilsTest : WordSpec() {
 
     init {
         "calculatePackageVerificationCode" should {
+            "return the SHA1 for an empty string on no input" {
+                calculatePackageVerificationCode(emptySequence<String>()) shouldBe EMPTY_PACKAGE_VERIFICATION_CODE
+            }
+
             "work for given SHA1s and excludes" {
                 val sha1sums = sequenceOf(
                     "0811bcab4e7a186f4d0d08d44cc5f06d721e7f6d",
@@ -138,6 +142,13 @@ class UtilsTest : WordSpec() {
                 text should endWith("limitations under the License.")
             }
 
+            "return the full license text for a valid SPDX license id with the '+' operator" {
+                val text = getLicenseText("Apache-2.0+")?.trim()
+
+                text should startWith("Apache License")
+                text should endWith("limitations under the License.")
+            }
+
             "return null for an invalid SPDX license id" {
                 getLicenseText("FooBar-1.0") should beNull()
             }
@@ -159,51 +170,32 @@ class UtilsTest : WordSpec() {
                 }
             }
 
-            "return the full license text for the HERE proprietary license" {
-                val text = getLicenseText("LicenseRef-scancode-here-proprietary")?.trim()
-
-                text should startWith("This software and other materials contain proprietary information")
-                text should endWith("allowed.")
-            }
-
-            "return the full license text for a known SPDX LicenseRef" {
-                val text = getLicenseText("LicenseRef-scancode-indiana-extreme")?.trim()
-
-                text should startWith("Indiana University Extreme! Lab Software License Version 1.1.1")
-                text should endWith("EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.")
-            }
-
             "return null for an unknown SPDX LicenseRef" {
                 getLicenseText("LicenseRef-foo-bar") should beNull()
+            }
+
+            "return the full license text for a LicenseRef-ort license" {
+                val text = getLicenseText("LicenseRef-ort-oracle-futc")?.trim()
+
+                text should startWith("Oracle Free Use Terms and Conditions")
+                text should endWith("Last updated: 9 October 2018")
             }
         }
 
         "getLicenseText provided a custom dir" should {
-            fun getText(id: String) = getLicenseText(id, true, listOf(tempDir))
-
             "return the custom license text for a license ID not known by ort but in custom dir" {
                 val id = "LicenseRef-ort-abc"
                 val text = "a\nb\nc\n"
 
                 setupTempFile(id, text)
 
-                getText(id) shouldBe text
-            }
-
-            "return the ort license text for a license ID known by ort and also in custom dir" {
-                val id = "LicenseRef-scancode-here-proprietary"
-                val text = "x\ny\n"
-
-                setupTempFile(id, text)
-
-                getText(id) shouldNotBe text
-                getText(id) shouldBe getLicenseText(id, true)
+                getLicenseText(id, handleExceptions = true, listOf(tempDir)) shouldBe text
             }
 
             "return null if license text is not known by ort and also not in custom dir" {
                 setupTempFile("LicenseRef-ort-abc", "abc")
 
-                getText("LicenseRef-not-present") should beNull()
+                getLicenseText("LicenseRef-not-present", handleExceptions = true, listOf(tempDir)) should beNull()
             }
         }
     }

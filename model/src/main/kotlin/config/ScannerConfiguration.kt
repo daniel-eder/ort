@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2017-2019 HERE Europe B.V.
+ * Copyright (C) 2021 Bosch.IO GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -81,6 +82,14 @@ data class ScannerConfiguration(
      */
     val ignorePatterns: List<String> = listOf(
         "**/*.ort.yml",
+        "**/*.spdx.yml",
+        "**/*.spdx.yaml",
+        "**/*.spdx.json",
         "**/META-INF/DEPENDENCIES"
-    )
+    ),
+
+    /**
+     * Configuration of the storage for provenance information.
+     */
+    val provenanceStorage: ProvenanceStorageConfiguration? = null
 )

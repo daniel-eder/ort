@@ -45,6 +45,7 @@ internal class StatisticsCalculator {
         repositoryConfiguration = getRepositoryConfigurationStatistics(ortResult),
         openIssues = getOpenIssues(ortResult, resolutionProvider),
         openRuleViolations = getOpenRuleViolations(ortResult, resolutionProvider),
+        openVulnerabilities = getOpenVulnerabilities(ortResult, resolutionProvider),
         dependencyTree = DependencyTreeStatistics(
             includedProjects = ortResult.getProjects().count { !ortResult.isExcluded(it.id) },
             excludedProjects = ortResult.getProjects().count { ortResult.isExcluded(it.id) },
@@ -59,24 +60,17 @@ internal class StatisticsCalculator {
     )
 
     private fun getOpenRuleViolations(ortResult: OrtResult, resolutionProvider: ResolutionProvider): IssueStatistics {
-        val openPolicyViolations = ortResult
-            .getRuleViolations()
-            .filterNot { policyViolation -> resolutionProvider.isResolved(policyViolation) }
+        val openRuleViolations = ortResult.getRuleViolations().filterNot { resolutionProvider.isResolved(it) }
 
         return IssueStatistics(
-            errors = openPolicyViolations.count { it.severity == Severity.ERROR },
-            warnings = openPolicyViolations.count { it.severity == Severity.WARNING },
-            hints = openPolicyViolations.count { it.severity == Severity.HINT }
+            errors = openRuleViolations.count { it.severity == Severity.ERROR },
+            warnings = openRuleViolations.count { it.severity == Severity.WARNING },
+            hints = openRuleViolations.count { it.severity == Severity.HINT }
         )
     }
 
     private fun getOpenIssues(ortResult: OrtResult, resolutionProvider: ResolutionProvider): IssueStatistics {
-        val openIssues = ortResult
-            .collectIssues()
-            .filterNot { (id, _) -> ortResult.isExcluded(id) }
-            .values
-            .flatten()
-            .filterNot { resolutionProvider.isResolved(it) }
+        val openIssues = ortResult.getOpenIssues(Severity.HINT).filterNot { resolutionProvider.isResolved(it) }
 
         return IssueStatistics(
             errors = openIssues.count { it.severity == Severity.ERROR },
@@ -84,6 +78,10 @@ internal class StatisticsCalculator {
             hints = openIssues.count { it.severity == Severity.HINT }
         )
     }
+
+    private fun getOpenVulnerabilities(ortResult: OrtResult, resolutionProvider: ResolutionProvider): Int =
+        ortResult.getVulnerabilities(omitExcluded = true).values.flatten()
+            .filterNot { resolutionProvider.isResolved(it) }.size
 
     private fun getTreeDepth(ortResult: OrtResult, ignoreExcluded: Boolean = false): Int =
         ortResult
@@ -138,13 +136,14 @@ internal class StatisticsCalculator {
 
         return RepositoryConfigurationStatistics(
             pathExcludes = config.excludes.paths.size,
-            scopeExclude = config.excludes.scopes.size,
+            scopeExcludes = config.excludes.scopes.size,
             licenseChoices = config.licenseChoices.let {
                 it.packageLicenseChoices.size + it.repositoryLicenseChoices.size
             },
             licenseFindingCurations = config.curations.licenseFindings.size,
+            issueResolutions = config.resolutions.issues.size,
             ruleViolationResolutions = config.resolutions.ruleViolations.size,
-            issueResolutions = config.resolutions.issues.size
+            vulnerabilityResolutions = config.resolutions.vulnerabilities.size
         )
     }
 }

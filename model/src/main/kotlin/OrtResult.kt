@@ -122,7 +122,7 @@ data class OrtResult(
             )
         }
 
-        log.perf { "Computing excluded projects took ${duration.inWholeSeconds}s." }
+        log.perf { "Computing excluded projects took $duration." }
 
         result
     }
@@ -163,7 +163,7 @@ data class OrtResult(
             }
         }
 
-        log.perf { "Computing excluded packages took ${duration.inWholeSeconds}s." }
+        log.perf { "Computing excluded packages took $duration." }
 
         result
     }
@@ -429,6 +429,27 @@ data class OrtResult(
     }
 
     @JsonIgnore
+    fun getVulnerabilities(
+        omitResolved: Boolean = false,
+        omitExcluded: Boolean = false
+    ): Map<Identifier, List<Vulnerability>> {
+        val allVulnerabilities = advisor?.results?.getVulnerabilities().orEmpty()
+            .filterKeys { !omitExcluded || !isExcluded(it) }
+
+        return if (omitResolved) {
+            val resolutions = getResolutions().vulnerabilities
+
+            allVulnerabilities.mapValues { (_, vulnerabilities) ->
+                vulnerabilities.filter { vulnerability ->
+                    resolutions.none { it.matches(vulnerability) }
+                }
+            }.filterValues { it.isNotEmpty() }
+        } else {
+            allVulnerabilities
+        }
+    }
+
+    @JsonIgnore
     fun getExcludes(): Excludes = repository.config.excludes
 
     /**
@@ -440,6 +461,15 @@ data class OrtResult(
         } else {
             emptyList()
         }
+
+    /**
+     * Retrieve all unresolved and non-excluded issues with severities equal to or over [minSeverity].
+     */
+    @JsonIgnore
+    fun getOpenIssues(minSeverity: Severity = Severity.WARNING) = collectIssues()
+        .mapNotNull { (id, issues) -> issues.takeUnless { isExcluded(id) } }
+        .flatten()
+        .filter { issue -> issue.severity >= minSeverity && getResolutions().issues.none { it.matches(issue) } }
 
     /**
      * Return the [Resolutions] contained in the repository configuration of this [OrtResult].
@@ -468,7 +498,7 @@ data class OrtResult(
     fun withResolvedScopes(): OrtResult =
         copy(
             analyzer = analyzer?.copy(
-                result = analyzer.result.withScopesResolved()
+                result = analyzer.result.withResolvedScopes()
             )
         )
 

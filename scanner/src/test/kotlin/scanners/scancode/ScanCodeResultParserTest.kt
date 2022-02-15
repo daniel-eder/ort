@@ -25,6 +25,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode
 
 import io.kotest.core.spec.style.WordSpec
 import io.kotest.inspectors.forAll
+import io.kotest.matchers.Matcher
 import io.kotest.matchers.collections.beEmpty
 import io.kotest.matchers.collections.containExactlyInAnyOrder
 import io.kotest.matchers.collections.haveSize
@@ -37,11 +38,12 @@ import io.kotest.matchers.string.shouldContain
 import java.io.File
 import java.time.Instant
 
-import org.ossreviewtoolkit.model.CopyrightFinding
 import org.ossreviewtoolkit.model.LicenseFinding
+import org.ossreviewtoolkit.model.ScanSummary
 import org.ossreviewtoolkit.model.TextLocation
 import org.ossreviewtoolkit.model.readJsonFile
 import org.ossreviewtoolkit.utils.spdx.SpdxConstants
+import org.ossreviewtoolkit.utils.test.transformingCollectionMatcher
 
 @Suppress("LargeClass")
 class ScanCodeResultParserTest : WordSpec({
@@ -71,484 +73,197 @@ class ScanCodeResultParserTest : WordSpec({
         }
     }
 
+    "Output format 1.0.0 results" should {
+        "be correctly summarized" {
+            val resultFile = File("src/test/assets/scancode-output-format-1.0.0_mime-types-2.1.18.json")
+            val result = readJsonFile(resultFile)
+
+            val summary = generateSummary(Instant.now(), Instant.now(), SpdxConstants.NONE, result)
+
+            summary.licenseFindings.size shouldBe 5
+            summary.copyrightFindings.size shouldBe 4
+            summary.issues should beEmpty()
+        }
+    }
+
     "generateSummary()" should {
         "properly summarize the license findings for ScanCode 2.2.1" {
-            // TODO: minimize this test case.
             val resultFile = File("src/test/assets/scancode-2.2.1_esprima-2.7.3.json")
             val result = readJsonFile(resultFile)
 
             val summary = generateSummary(Instant.now(), Instant.now(), SpdxConstants.NONE, result)
 
-            summary.licenseFindings should containExactlyInAnyOrder(
-                LicenseFinding(
-                    license = "BSD-2-Clause",
-                    location = TextLocation("LICENSE.BSD", 3, 21)
-                ),
-                LicenseFinding(
-                    license = "BSD-2-Clause",
-                    location = TextLocation("bin/esparse.js", 5, 23)
-                ),
-                LicenseFinding(
-                    license = "BSD-2-Clause",
-                    location = TextLocation("bin/esvalidate.js", 5, 23)
-                ),
-                LicenseFinding(
-                    license = "BSD-2-Clause",
-                    location = TextLocation("esprima.js", 4, 22)
-                ),
-                LicenseFinding(
-                    license = "BSD-2-Clause",
-                    location = TextLocation("test/benchmarks.js", 4, 22)
-                ),
-                LicenseFinding(
-                    license = "BSD-2-Clause",
-                    location = TextLocation("test/browser-tests.js", 4, 22)
-                ),
-                LicenseFinding(
-                    license = "BSD-2-Clause",
-                    location = TextLocation("test/check-complexity.js", 4, 22)
-                ),
-                LicenseFinding(
-                    license = "BSD-2-Clause",
-                    location = TextLocation("test/check-version.js", 6, 24)
-                ),
-                LicenseFinding(
-                    license = "BSD-2-Clause",
-                    location = TextLocation("test/downstream.js", 4, 22)
-                ),
-                LicenseFinding(
-                    license = "BSD-2-Clause",
-                    location = TextLocation("test/grammar-tests.js", 4, 22)
-                ),
-                LicenseFinding(
-                    license = "BSD-2-Clause",
-                    location = TextLocation("test/profile.js", 4, 22)
-                ),
-                LicenseFinding(
-                    license = "BSD-2-Clause",
-                    location = TextLocation("test/regression-tests.js", 4, 22)
-                ),
-                LicenseFinding(
-                    license = "BSD-2-Clause",
-                    location = TextLocation("test/unit-tests.js", 4, 22)
-                ),
-                LicenseFinding(
-                    license = "BSD-2-Clause",
-                    location = TextLocation("test/utils/create-testcases.js", 4, 22)
-                ),
-                LicenseFinding(
-                    license = "BSD-2-Clause",
-                    location = TextLocation("test/utils/error-to-object.js", 4, 22)
-                ),
-                LicenseFinding(
-                    license = "BSD-2-Clause",
-                    location = TextLocation("test/utils/evaluate-testcase.js", 4, 22)
-                ),
-                LicenseFinding(
-                    license = "BSD-2-Clause",
-                    location = TextLocation("tools/generate-fixtures.js", 3, 19)
-                ),
-                LicenseFinding(
-                    license = "BSD-3-Clause",
-                    location = TextLocation("bower.json", 20, 20)
-                ),
-                LicenseFinding(
-                    license = "BSD-3-Clause",
-                    location = TextLocation("package.json", 37, 37)
-                ),
-                LicenseFinding(
-                    license = "BSD-3-Clause",
-                    location = TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 1910)
-                ),
-                LicenseFinding(
-                    license = "BSD-3-Clause",
-                    location = TextLocation("test/3rdparty/yui-3.12.0.js", 4)
-                ),
-                LicenseFinding(
-                    license = "GPL-1.0+",
-                    location = TextLocation("test/3rdparty/jquery-1.9.1.js", 10)
-                ),
-                LicenseFinding(
-                    license = "GPL-1.0+",
-                    location = TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 8)
-                ),
-                LicenseFinding(
-                    license = "GPL-1.0+",
-                    location = TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 233)
-                ),
-                LicenseFinding(
-                    license = "GPL-1.0+",
-                    location = TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 832)
-                ),
-                LicenseFinding(
-                    license = "GPL-1.0+",
-                    location = TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 1522, 1523)
-                ),
-                LicenseFinding(
-                    license = "GPL-1.0+",
-                    location = TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 1538, 1539)
-                ),
-                LicenseFinding(
-                    license = "GPL-1.0+",
-                    location = TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 14001)
-                ),
-                LicenseFinding(
-                    license = "LGPL-2.0+",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 28)
-                ),
-                LicenseFinding(
-                    license = "LGPL-2.0+",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 4718)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/angular-1.2.5.js", 4)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/backbone-1.1.0.js", 5)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/benchmark.js", 6)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/jquery-1.9.1.js", 9)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/jquery-1.9.1.js", 10)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/jquery-1.9.1.js", 3690)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 7)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 8)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 232)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 233)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 831)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 832)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 1522, 1523)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 1538, 1539)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 1910)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 14000)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 14001)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 21)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 29)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 542)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 723)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 807)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 861)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 991)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 1202)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 1457)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 1584)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 1701)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 1881)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 3043)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 4103)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 4322)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 4514)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 4715)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 4999)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 5180)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 5350)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 5463)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 5542)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 5657)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 5937)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 6027)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 6110)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 6158)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 6234)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 6341)
-                ),
-                LicenseFinding(
-                    license = "MIT",
-                    location = TextLocation("test/3rdparty/underscore-1.5.2.js", 4)
-                )
+            summary should containLicensesExactly(
+                "BSD-2-Clause",
+                "BSD-3-Clause",
+                "GPL-1.0+",
+                "LGPL-2.0+",
+                "MIT"
+            )
+
+            summary should containLocationsForLicenseExactly(
+                "BSD-2-Clause",
+                TextLocation("LICENSE.BSD", 3, 21),
+                TextLocation("bin/esparse.js", 5, 23),
+                TextLocation("bin/esvalidate.js", 5, 23),
+                TextLocation("esprima.js", 4, 22),
+                TextLocation("test/benchmarks.js", 4, 22),
+                TextLocation("test/browser-tests.js", 4, 22),
+                TextLocation("test/check-complexity.js", 4, 22),
+                TextLocation("test/check-version.js", 6, 24),
+                TextLocation("test/downstream.js", 4, 22),
+                TextLocation("test/grammar-tests.js", 4, 22),
+                TextLocation("test/profile.js", 4, 22),
+                TextLocation("test/regression-tests.js", 4, 22),
+                TextLocation("test/unit-tests.js", 4, 22),
+                TextLocation("test/utils/create-testcases.js", 4, 22),
+                TextLocation("test/utils/error-to-object.js", 4, 22),
+                TextLocation("test/utils/evaluate-testcase.js", 4, 22),
+                TextLocation("tools/generate-fixtures.js", 3, 19)
+            )
+
+            summary should containLocationsForLicenseExactly(
+                "BSD-3-Clause",
+                TextLocation("bower.json", 20, 20),
+                TextLocation("package.json", 37, 37),
+                TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 1910),
+                TextLocation("test/3rdparty/yui-3.12.0.js", 4)
+            )
+
+            summary should containLocationsForLicenseExactly(
+                "GPL-1.0+",
+                TextLocation("test/3rdparty/jquery-1.9.1.js", 10),
+                TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 8),
+                TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 233),
+                TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 832),
+                TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 1522, 1523),
+                TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 1538, 1539),
+                TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 14001)
+            )
+
+            summary should containLocationsForLicenseExactly(
+                "LGPL-2.0+",
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 28),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 4718)
+            )
+
+            summary should containLocationsForLicenseExactly(
+                "MIT",
+                TextLocation("test/3rdparty/angular-1.2.5.js", 4),
+                TextLocation("test/3rdparty/backbone-1.1.0.js", 5),
+                TextLocation("test/3rdparty/benchmark.js", 6),
+                TextLocation("test/3rdparty/jquery-1.9.1.js", 9),
+                TextLocation("test/3rdparty/jquery-1.9.1.js", 10),
+                TextLocation("test/3rdparty/jquery-1.9.1.js", 3690),
+                TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 7),
+                TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 8),
+                TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 232),
+                TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 233),
+                TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 831),
+                TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 832),
+                TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 1522, 1523),
+                TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 1538, 1539),
+                TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 1910),
+                TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 14000),
+                TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 14001),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 21),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 29),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 542),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 723),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 807),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 861),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 991),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 1202),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 1457),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 1584),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 1701),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 1881),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 3043),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 4103),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 4322),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 4514),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 4715),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 4999),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 5180),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 5350),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 5463),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 5542),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 5657),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 5937),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 6027),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 6110),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 6158),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 6234),
+                TextLocation("test/3rdparty/mootools-1.4.5.js", 6341),
+                TextLocation("test/3rdparty/underscore-1.5.2.js", 4)
             )
         }
 
         "properly summarize the copyright findings for ScanCode 2.2.1" {
-            // TODO: minimize this test case
             val resultFile = File("src/test/assets/scancode-2.2.1_esprima-2.7.3.json")
             val result = readJsonFile(resultFile)
 
             val summary = generateSummary(Instant.now(), Instant.now(), SpdxConstants.NONE, result)
 
-            summary.copyrightFindings should containExactlyInAnyOrder(
-                CopyrightFinding(
-                    statement = "(c) 2007-2008 Steven Levithan",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 1881, 1883)
+            summary should containCopyrightsExactly(
+                "(c) 2007-2008 Steven Levithan" to
+                        listOf(TextLocation("test/3rdparty/mootools-1.4.5.js", 1881, 1883)),
+                "(c) 2009-2013 Jeremy Ashkenas, DocumentCloud and Investigative Reporters & Editors Underscore" to
+                        listOf(TextLocation("test/3rdparty/underscore-1.5.2.js", 2, 4)),
+                "(c) 2010-2011 Jeremy Ashkenas, DocumentCloud Inc." to
+                        listOf(TextLocation("test/3rdparty/backbone-1.1.0.js", 3, 6)),
+                "(c) 2010-2014 Google, Inc. http://angularjs.org" to
+                        listOf(TextLocation("test/3rdparty/angular-1.2.5.js", 2, 4)),
+                "(c) 2011-2013 Jeremy Ashkenas, DocumentCloud and Investigative Reporters & Editors Backbone" to
+                        listOf(TextLocation("test/3rdparty/backbone-1.1.0.js", 3, 6)),
+                "Copyright (c) 2005-2007 Sam Stephenson" to
+                        listOf(TextLocation("test/3rdparty/mootools-1.4.5.js", 27, 29)),
+                "Copyright (c) 2006 Dean Edwards, GNU Lesser General Public" to
+                        listOf(TextLocation("test/3rdparty/mootools-1.4.5.js", 27, 29)),
+                "Copyright (c) 2006-2012 Valerio Proietti" to
+                        listOf(TextLocation("test/3rdparty/mootools-1.4.5.js", 23)),
+                "Copyright (c) 2010 Cowboy Ben Alman" to listOf(
+                    TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 1521, 1523),
+                    TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 1537, 1539)
                 ),
-                CopyrightFinding(
-                    statement = "(c) 2009-2013 Jeremy Ashkenas, DocumentCloud and Investigative Reporters & " +
-                            "Editors Underscore",
-                    location = TextLocation("test/3rdparty/underscore-1.5.2.js", 2, 4)
+                "Copyright (c) jQuery Foundation, Inc. and Contributors" to listOf(
+                    TextLocation("LICENSE.BSD", 1),
+                    TextLocation("bin/esparse.js", 3),
+                    TextLocation("bin/esvalidate.js", 3),
+                    TextLocation("esprima.js", 2),
+                    TextLocation("test/benchmarks.js", 2),
+                    TextLocation("test/browser-tests.js", 2),
+                    TextLocation("test/check-complexity.js", 2),
+                    TextLocation("test/check-version.js", 4),
+                    TextLocation("test/downstream.js", 2),
+                    TextLocation("test/grammar-tests.js", 2),
+                    TextLocation("test/profile.js", 2),
+                    TextLocation("test/regression-tests.js", 2),
+                    TextLocation("test/unit-tests.js", 2),
+                    TextLocation("test/utils/create-testcases.js", 2),
+                    TextLocation("test/utils/error-to-object.js", 2),
+                    TextLocation("test/utils/evaluate-testcase.js", 2),
+                    TextLocation("tools/generate-fixtures.js", 2)
                 ),
-                CopyrightFinding(
-                    statement = "(c) 2010-2011 Jeremy Ashkenas, DocumentCloud Inc.",
-                    location = TextLocation("test/3rdparty/backbone-1.1.0.js", 3, 6)
+                "Copyright 2005, 2012 jQuery Foundation, Inc." to
+                        listOf(TextLocation("test/3rdparty/jquery-1.9.1.js", 8, 10)),
+                "Copyright 2010, 2014 jQuery Foundation, Inc." to
+                        listOf(TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 6, 8)),
+                "Copyright 2010-2012 Mathias Bynens" to
+                        listOf(TextLocation("test/3rdparty/benchmark.js", 2, 6)),
+                "Copyright 2012 jQuery Foundation" to
+                        listOf(TextLocation("test/3rdparty/jquery-1.9.1.js", 3688, 3691)),
+                "Copyright 2013 Yahoo! Inc." to
+                        listOf(TextLocation("test/3rdparty/yui-3.12.0.js", 2, 3)),
+                "Copyright 2013 jQuery Foundation" to listOf(
+                    TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 231, 233),
+                    TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 830, 832),
+                    TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 13999, 14001)
                 ),
-                CopyrightFinding(
-                    statement = "(c) 2010-2014 Google, Inc. http://angularjs.org",
-                    location = TextLocation("test/3rdparty/angular-1.2.5.js", 2, 4)
-                ),
-                CopyrightFinding(
-                    statement = "(c) 2011-2013 Jeremy Ashkenas, DocumentCloud and Investigative Reporters & " +
-                            "Editors Backbone",
-                    location = TextLocation("test/3rdparty/backbone-1.1.0.js", 3, 6)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright (c) 2005-2007 Sam Stephenson",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 27, 29)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright (c) 2006 Dean Edwards, GNU Lesser General Public",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 27, 29)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright (c) 2006-2012 Valerio Proietti",
-                    location = TextLocation("test/3rdparty/mootools-1.4.5.js", 23)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright (c) 2010 Cowboy Ben Alman",
-                    location = TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 1521, 1523)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright (c) 2010 Cowboy Ben Alman",
-                    location = TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 1537, 1539)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright (c) jQuery Foundation, Inc. and Contributors",
-                    location = TextLocation("LICENSE.BSD", 1)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright (c) jQuery Foundation, Inc. and Contributors",
-                    location = TextLocation("bin/esparse.js", 3)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright (c) jQuery Foundation, Inc. and Contributors",
-                    location = TextLocation("bin/esvalidate.js", 3)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright (c) jQuery Foundation, Inc. and Contributors",
-                    location = TextLocation("esprima.js", 2)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright (c) jQuery Foundation, Inc. and Contributors",
-                    location = TextLocation("test/benchmarks.js", 2)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright (c) jQuery Foundation, Inc. and Contributors",
-                    location = TextLocation("test/browser-tests.js", 2)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright (c) jQuery Foundation, Inc. and Contributors",
-                    location = TextLocation("test/check-complexity.js", 2)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright (c) jQuery Foundation, Inc. and Contributors",
-                    location = TextLocation("test/check-version.js", 4)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright (c) jQuery Foundation, Inc. and Contributors",
-                    location = TextLocation("test/downstream.js", 2)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright (c) jQuery Foundation, Inc. and Contributors",
-                    location = TextLocation("test/grammar-tests.js", 2)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright (c) jQuery Foundation, Inc. and Contributors",
-                    location = TextLocation("test/profile.js", 2)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright (c) jQuery Foundation, Inc. and Contributors",
-                    location = TextLocation("test/regression-tests.js", 2)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright (c) jQuery Foundation, Inc. and Contributors",
-                    location = TextLocation("test/unit-tests.js", 2)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright (c) jQuery Foundation, Inc. and Contributors",
-                    location = TextLocation("test/utils/create-testcases.js", 2)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright (c) jQuery Foundation, Inc. and Contributors",
-                    location = TextLocation("test/utils/error-to-object.js", 2)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright (c) jQuery Foundation, Inc. and Contributors",
-                    location = TextLocation("test/utils/evaluate-testcase.js", 2)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright (c) jQuery Foundation, Inc. and Contributors",
-                    location = TextLocation("tools/generate-fixtures.js", 2)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright 2005, 2012 jQuery Foundation, Inc.",
-                    location = TextLocation("test/3rdparty/jquery-1.9.1.js", 8, 10)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright 2010, 2014 jQuery Foundation, Inc.",
-                    location = TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 6, 8)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright 2010-2012 Mathias Bynens",
-                    location = TextLocation("test/3rdparty/benchmark.js", 2, 6)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright 2012 jQuery Foundation",
-                    location = TextLocation("test/3rdparty/jquery-1.9.1.js", 3688, 3691)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright 2013 Yahoo! Inc.",
-                    location = TextLocation("test/3rdparty/yui-3.12.0.js", 2, 3)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright 2013 jQuery Foundation",
-                    location = TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 231, 233)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright 2013 jQuery Foundation",
-                    location = TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 830, 832)
-                ),
-                CopyrightFinding(
-                    statement = "Copyright 2013 jQuery Foundation",
-                    location = TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 13999, 14001)
-                ),
-                CopyrightFinding(
-                    statement = "copyright (c) 2012 Scott Jehl, Paul Irish, Nicholas Zakas.",
-                    location = TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 1910, 1911)
-                ),
-                CopyrightFinding(
-                    statement = "copyright Robert Kieffer",
-                    location = TextLocation("test/3rdparty/benchmark.js", 2, 6)
-                )
+                "copyright (c) 2012 Scott Jehl, Paul Irish, Nicholas Zakas." to
+                        listOf(TextLocation("test/3rdparty/jquery.mobile-1.4.2.js", 1910, 1911)),
+                "copyright Robert Kieffer" to
+                        listOf(TextLocation("test/3rdparty/benchmark.js", 2, 6))
             )
         }
 
@@ -557,7 +272,7 @@ class ScanCodeResultParserTest : WordSpec({
             val result = readJsonFile(resultFile)
 
             val actualFindings = generateSummary(Instant.now(), Instant.now(), SpdxConstants.NONE, result)
-                    .licenseFindings
+                .licenseFindings
 
             actualFindings.distinctBy { it.license } should haveSize(1)
             actualFindings should haveSize(517)
@@ -580,7 +295,7 @@ class ScanCodeResultParserTest : WordSpec({
             val result = readJsonFile(resultFile)
 
             val actualFindings = generateSummary(Instant.now(), Instant.now(), SpdxConstants.NONE, result)
-                    .copyrightFindings
+                .copyrightFindings
 
             actualFindings.mapTo(mutableSetOf()) { it.statement } should containExactlyInAnyOrder(
                 "Copyright (c) 2016 Amazon.com, Inc.",
@@ -619,6 +334,42 @@ class ScanCodeResultParserTest : WordSpec({
             )
         }
 
+        "properly summarize license findings for output format 1.0.0" {
+            val resultFile = File("src/test/assets/scancode-output-format-1.0.0_mime-types-2.1.18.json")
+            val result = readJsonFile(resultFile)
+
+            val summary = generateSummary(Instant.now(), Instant.now(), SpdxConstants.NONE, result)
+
+            summary should containLicensesExactly("MIT")
+
+            summary should containLocationsForLicenseExactly(
+                "MIT",
+                TextLocation("LICENSE", 1),
+                TextLocation("LICENSE", 6, 23),
+                TextLocation("README.md", 95, 97),
+                TextLocation("index.js", 5),
+                TextLocation("package.json", 10, 10)
+            )
+        }
+
+        "properly summarize copyright findings for output format 1.0.0" {
+            val resultFile = File("src/test/assets/scancode-output-format-1.0.0_mime-types-2.1.18.json")
+            val result = readJsonFile(resultFile)
+
+            val summary = generateSummary(Instant.now(), Instant.now(), SpdxConstants.NONE, result)
+
+            summary should containCopyrightsExactly(
+                "Copyright (c) 2014 Jonathan Ong" to
+                        listOf(TextLocation("index.js", 3)),
+                "Copyright (c) 2014 Jonathan Ong <me@jongleberry.com>" to
+                        listOf(TextLocation("LICENSE", 3)),
+                "Copyright (c) 2015 Douglas Christopher Wilson" to
+                        listOf(TextLocation("index.js", 4)),
+                "Copyright (c) 2015 Douglas Christopher Wilson <doug@somethingdoug.com>" to
+                        listOf(TextLocation("LICENSE", 4))
+            )
+        }
+
         "properly parse absolute paths" {
             val resultFile = File("src/test/assets/scancode-3.2.1rc2_spring-javaformat-checkstyle-0.0.15.json")
             val result = readJsonFile(resultFile)
@@ -653,6 +404,16 @@ class ScanCodeResultParserTest : WordSpec({
             val details = generateScannerDetails(result)
             details.name shouldBe ScanCode.SCANNER_NAME
             details.version shouldBe "3.0.2"
+            details.configuration shouldContain "--timeout 300.0"
+            details.configuration shouldContain "--processes 3"
+        }
+
+        "parse an output format 1.0.0 result file" {
+            val result = readJsonFile(File("src/test/assets/scancode-output-format-1.0.0_mime-types-2.1.18.json"))
+
+            val details = generateScannerDetails(result)
+            details.name shouldBe ScanCode.SCANNER_NAME
+            details.version shouldBe "30.1.0"
             details.configuration shouldContain "--timeout 300.0"
             details.configuration shouldContain "--processes 3"
         }
@@ -742,8 +503,9 @@ class ScanCodeResultParserTest : WordSpec({
         }
 
         "return false for scan results with other unknown errors" {
-            val resultFile = File("src/test/assets/scancode-2.2.1.post277.4d68f9377_" +
-                    "kotlin-annotation-processing-gradle-1.2.21.json")
+            val resultFile = File(
+                "src/test/assets/scancode-2.2.1.post277.4d68f9377_kotlin-annotation-processing-gradle-1.2.21.json"
+            )
             val result = readJsonFile(resultFile)
 
             val summary = generateSummary(Instant.now(), Instant.now(), SpdxConstants.NONE, result)
@@ -806,3 +568,19 @@ class ScanCodeResultParserTest : WordSpec({
         }
     }
 })
+
+private fun containLicensesExactly(vararg licenses: String): Matcher<ScanSummary?> =
+    transformingCollectionMatcher(expected = licenses.toList(), matcher = ::containExactlyInAnyOrder) { summary ->
+        summary.licenseFindings.map { it.license.toString() }.toSet()
+    }
+
+private fun containLocationsForLicenseExactly(license: String, vararg locations: TextLocation): Matcher<ScanSummary?> =
+    transformingCollectionMatcher(expected = locations.toList(), matcher = ::containExactlyInAnyOrder) { summary ->
+        summary.licenseFindings.filter { it.license.toString() == license }.map { it.location }
+    }
+
+private fun containCopyrightsExactly(vararg copyrights: Pair<String, List<TextLocation>>): Matcher<ScanSummary?> =
+    transformingCollectionMatcher(expected = copyrights.toList(), matcher = ::containExactlyInAnyOrder) { summary ->
+        summary.copyrightFindings.groupBy { it.statement }.entries
+            .map { (key, value) -> key to value.map { it.location } }
+    }

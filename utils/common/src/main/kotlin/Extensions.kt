@@ -40,14 +40,6 @@ import java.nio.file.attribute.BasicFileAttributes
 import java.util.EnumSet
 import java.util.Locale
 
-import kotlin.reflect.full.memberProperties
-
-/**
- * Return whether [T] (usually an instance of a data class) has any non-null property.
- */
-inline fun <reified T : Any> T.hasNonNullProperty() =
-    T::class.memberProperties.asSequence().map { it.get(this) }.any { it != null }
-
 /**
  * Return a string of hexadecimal digits representing the bytes in the array.
  */
@@ -56,13 +48,13 @@ fun ByteArray.toHexString(): String = joinToString("") { String.format(Locale.RO
 /**
  * Return the duplicates as identified by [keySelector] of a collection.
  */
-fun <T, K> Collection<T>.getDuplicates(keySelector: (T) -> K): Set<K> =
-    if (this is Set) emptySet() else groupBy(keySelector).filter { it.value.size > 1 }.keys
+fun <T, K> Collection<T>.getDuplicates(keySelector: (T) -> K): Map<K, List<T>> =
+    if (this is Set) emptyMap() else groupBy(keySelector).filter { it.value.size > 1 }
 
 /**
  * Return the duplicates of a collection.
  */
-fun <T> Collection<T>.getDuplicates(): Set<T> = getDuplicates { it }
+fun <T> Collection<T>.getDuplicates(): Set<T> = getDuplicates { it }.keys
 
 /**
  * Format this [Double] as a string with the provided number of [decimalPlaces].
@@ -231,6 +223,11 @@ fun File.toSafeUri(): URI {
     val fileUri = toURI()
     return URI("file", "", fileUri.path, fileUri.query, fileUri.fragment)
 }
+
+/**
+ * Return the next value in the iteration, or null if there is no next value.
+ */
+fun <T> Iterator<T>.nextOrNull() = if (hasNext()) next() else null
 
 /*
  * Convenience function for [JsonNode] that returns an empty iterator if [JsonNode.fieldNames] is called on a null

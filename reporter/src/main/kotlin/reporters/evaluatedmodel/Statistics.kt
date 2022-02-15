@@ -29,12 +29,14 @@ import org.ossreviewtoolkit.model.Project
 import org.ossreviewtoolkit.model.RuleViolation
 import org.ossreviewtoolkit.model.Scope
 import org.ossreviewtoolkit.model.Severity
+import org.ossreviewtoolkit.model.Vulnerability
 import org.ossreviewtoolkit.model.config.IssueResolution
 import org.ossreviewtoolkit.model.config.LicenseChoices
 import org.ossreviewtoolkit.model.config.LicenseFindingCuration
 import org.ossreviewtoolkit.model.config.PathExclude
 import org.ossreviewtoolkit.model.config.RuleViolationResolution
 import org.ossreviewtoolkit.model.config.ScopeExclude
+import org.ossreviewtoolkit.model.config.VulnerabilityResolution
 
 /**
  * A class containing statistics for an [OrtResult].
@@ -54,6 +56,11 @@ data class Statistics(
      * The number of [RuleViolation]s by severity which are not resolved.
      */
     val openRuleViolations: IssueStatistics,
+
+    /**
+     * The number of [Vulnerabilities][Vulnerability] which are not resolved and not excluded.
+     */
+    val openVulnerabilities: Int,
 
     /**
      * Statistics for the dependency tree.
@@ -158,7 +165,7 @@ data class RepositoryConfigurationStatistics(
     /**
      * The number of [ScopeExclude]s.
      */
-    val scopeExclude: Int,
+    val scopeExcludes: Int,
 
     /**
      * The number of [LicenseChoices].
@@ -171,12 +178,17 @@ data class RepositoryConfigurationStatistics(
     val licenseFindingCurations: Int,
 
     /**
+     * The number of [IssueResolution]s.
+     */
+    val issueResolutions: Int,
+
+    /**
      * The number of [RuleViolationResolution]s.
      */
     val ruleViolationResolutions: Int,
 
     /**
-     * The number of [IssueResolution]s.
+     * The number of [VulnerabilityResolution]s.
      */
-    val issueResolutions: Int
+    val vulnerabilityResolutions: Int
 )

@@ -41,9 +41,12 @@ abstract class VersionControlSystem {
         private val LOADER = ServiceLoader.load(VersionControlSystem::class.java)!!
 
         /**
-         * The (prioritized) list of all available Version Control Systems in the classpath.
+         * The set of all available [Version Control Systems][VersionControlSystem] in the classpath, sorted by
+         * priority.
          */
-        val ALL by lazy { LOADER.iterator().asSequence().toList().sortedByDescending { it.priority } }
+        val ALL: Set<VersionControlSystem> by lazy {
+            LOADER.iterator().asSequence().toSortedSet(compareByDescending { it.priority })
+        }
 
         /**
          * Return the applicable VCS for the given [vcsType], or null if none is applicable.
@@ -64,11 +67,20 @@ abstract class VersionControlSystem {
          */
         @Synchronized
         fun forUrl(vcsUrl: String) =
+            // Do not use getOrPut() here as it cannot handle null values, also see
+            // https://youtrack.jetbrains.com/issue/KT-21392.
             if (vcsUrl in urlToVcsMap) {
                 urlToVcsMap[vcsUrl]
             } else {
-                ALL.find {
-                    it.isAvailable() && it.isApplicableUrl(vcsUrl)
+                // First try to determine the VCS type statically...
+                when (val type = VcsHost.toVcsInfo(vcsUrl).type) {
+                    VcsType.UNKNOWN -> {
+                        // ...then eventually try to determine the type also dynamically.
+                        ALL.find {
+                            it.isAvailable() && it.isApplicableUrl(vcsUrl)
+                        }
+                    }
+                    else -> forType(type)
                 }.also {
                     urlToVcsMap[vcsUrl] = it
                 }

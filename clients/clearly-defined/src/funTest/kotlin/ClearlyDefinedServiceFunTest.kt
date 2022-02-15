@@ -22,8 +22,8 @@ package org.ossreviewtoolkit.clients.clearlydefined
 import com.fasterxml.jackson.module.kotlin.readValue
 
 import io.kotest.core.spec.style.WordSpec
+import io.kotest.matchers.collections.beEmpty
 import io.kotest.matchers.comparables.shouldBeGreaterThan
-import io.kotest.matchers.nulls.beNull
 import io.kotest.matchers.should
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNot
@@ -33,25 +33,23 @@ import java.io.File
 
 import org.ossreviewtoolkit.clients.clearlydefined.ClearlyDefinedService.ContributionInfo
 import org.ossreviewtoolkit.clients.clearlydefined.ClearlyDefinedService.ContributionPatch
-import org.ossreviewtoolkit.clients.clearlydefined.ClearlyDefinedService.Coordinates
-import org.ossreviewtoolkit.clients.clearlydefined.ClearlyDefinedService.Curation
-import org.ossreviewtoolkit.clients.clearlydefined.ClearlyDefinedService.Licensed
-import org.ossreviewtoolkit.clients.clearlydefined.ClearlyDefinedService.Patch
 import org.ossreviewtoolkit.clients.clearlydefined.ClearlyDefinedService.Server
 import org.ossreviewtoolkit.utils.test.ExpensiveTag
 import org.ossreviewtoolkit.utils.test.shouldNotBeNull
 
 class ClearlyDefinedServiceFunTest : WordSpec({
     "A contribution patch" should {
-        "be correctly deserialized even when using invalid facet arrays" {
+        "be correctly deserialized when using empty facet arrays" {
             // See https://github.com/clearlydefined/curated-data/blob/0b2db78/curations/maven/mavencentral/com.google.code.gson/gson.yaml#L10-L11.
-            val curationWithInvalidFacetArrays = File("src/funTest/assets/gson.json")
+            val curationWithEmptyFacetArrays = File("src/funTest/assets/gson.json")
 
-            val curation = ClearlyDefinedService.JSON_MAPPER.readValue<Curation>(curationWithInvalidFacetArrays)
+            val curation = ClearlyDefinedService.JSON_MAPPER.readValue<Curation>(curationWithEmptyFacetArrays)
 
-            curation.described?.facets.shouldNotBeNull {
-                dev should beNull()
-                tests should beNull()
+            curation.described?.facets?.dev.shouldNotBeNull {
+                this should beEmpty()
+            }
+            curation.described?.facets?.tests.shouldNotBeNull {
+                this should beEmpty()
             }
         }
     }
@@ -99,7 +97,7 @@ class ClearlyDefinedServiceFunTest : WordSpec({
         )
 
         val revisions = mapOf(
-            "6.2.3" to Curation(licensed = Licensed(declared = "Apache-1.0"))
+            "6.2.3" to Curation(licensed = CurationLicensed(declared = "Apache-1.0"))
         )
 
         val patch = Patch(

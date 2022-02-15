@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2017-2019 HERE Europe B.V.
  * Copyright (C) 2019 Bosch Software Innovations GmbH
- * Copyright (C) 2020 Bosch.IO GmbH
+ * Copyright (C) 2020-2022 Bosch.IO GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -47,6 +47,7 @@ import okhttp3.Request
 import org.apache.logging.log4j.Level
 
 import org.ossreviewtoolkit.analyzer.PackageManager
+import org.ossreviewtoolkit.analyzer.PackageManager.Companion.processPackageVcs
 import org.ossreviewtoolkit.analyzer.managers.utils.NuGetAllPackageData.PackageData
 import org.ossreviewtoolkit.analyzer.managers.utils.NuGetAllPackageData.PackageDetails
 import org.ossreviewtoolkit.analyzer.managers.utils.NuGetAllPackageData.PackageSpec
@@ -150,13 +151,12 @@ class NuGetSupport(serviceIndexUrls: List<String> = listOf(DEFAULT_SERVICE_INDEX
         // Note: The package name in the URL is case-sensitive and must be lower-case!
         val lowerId = id.name.lowercase()
 
-        val data = registrationsBaseUrls.asSequence().mapNotNull { baseUrl ->
+        val data = registrationsBaseUrls.asSequence().firstNotNullOfOrNull { baseUrl ->
             runCatching {
                 val dataUrl = "$baseUrl/$lowerId/${id.version}.json"
                 runBlocking { mapFromUrl<PackageData>(JSON_MAPPER, dataUrl) }
             }.getOrNull()
-        }.firstOrNull()
-            ?: throw IOException("Failed to retrieve package data for '$lowerId' from any of $registrationsBaseUrls.")
+        } ?: throw IOException("Failed to retrieve package data for '$lowerId' from any of $registrationsBaseUrls.")
 
         val nupkgUrl = data.packageContent
         val nuspecUrl = nupkgUrl.replace(".${id.version}.nupkg", ".nuspec")
@@ -178,18 +178,21 @@ class NuGetSupport(serviceIndexUrls: List<String> = listOf(DEFAULT_SERVICE_INDEX
         }.orEmpty()
 
         return with(all.details) {
+            val homepageUrl = projectUrl.orEmpty()
+
             Package(
                 id = getIdentifier(id, version),
                 authors = parseAuthors(all.spec),
                 declaredLicenses = parseLicenses(all.spec),
                 description = description.orEmpty(),
-                homepageUrl = projectUrl.orEmpty(),
+                homepageUrl = homepageUrl,
                 binaryArtifact = RemoteArtifact(
                     url = all.data.packageContent,
                     hash = Hash.create("$packageHashAlgorithm-$packageHash")
                 ),
                 sourceArtifact = RemoteArtifact.EMPTY,
-                vcs = vcs
+                vcs = vcs,
+                vcsProcessed = processPackageVcs(vcs, homepageUrl)
             )
         }
     }
@@ -283,8 +286,15 @@ private fun resolveLocalSpec(definitionFile: File): File? =
 private fun getIdentifier(name: String, version: String) =
     Identifier(type = "NuGet", namespace = "", name = name, version = version)
 
+data class NuGetDependency(
+    val name: String,
+    val version: String,
+    val targetFramework: String,
+    val developmentDependency: Boolean = false
+)
+
 interface XmlPackageFileReader {
-    fun getPackageReferences(definitionFile: File): Set<Identifier>
+    fun getDependencies(definitionFile: File): Set<NuGetDependency>
 }
 
 fun PackageManager.resolveNuGetDependencies(
@@ -300,8 +310,9 @@ fun PackageManager.resolveNuGetDependencies(
     val packages = sortedSetOf<Package>()
     val issues = mutableListOf<OrtIssue>()
 
-    val references = reader.getPackageReferences(definitionFile)
-    support.buildDependencyTree(references, dependencies, packages, issues)
+    val references = reader.getDependencies(definitionFile)
+    val ids = references.map { Identifier(type = "NuGet", namespace = "", name = it.name, version = it.version) }
+    support.buildDependencyTree(ids, dependencies, packages, issues)
 
     val project = getProject(definitionFile, workingDir, scope)
 

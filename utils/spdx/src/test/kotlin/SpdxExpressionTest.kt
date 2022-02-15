@@ -24,11 +24,10 @@ import com.fasterxml.jackson.dataformat.yaml.YAMLMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 
 import io.kotest.assertions.assertSoftly
-import io.kotest.assertions.show.show
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.WordSpec
 import io.kotest.matchers.Matcher
-import io.kotest.matchers.MatcherResult
+import io.kotest.matchers.be
 import io.kotest.matchers.collections.containExactlyInAnyOrder
 import io.kotest.matchers.neverNullMatcher
 import io.kotest.matchers.should
@@ -141,6 +140,7 @@ class SpdxExpressionTest : WordSpec() {
                     shouldThrow<SpdxException> {
                         deprecatedExpression.toSpdx(Strictness.ALLOW_CURRENT)
                     }
+
                     shouldThrow<SpdxException> {
                         deprecatedExpressionWithException.toSpdx(Strictness.ALLOW_CURRENT)
                     }
@@ -170,6 +170,63 @@ class SpdxExpressionTest : WordSpec() {
                 assertSoftly {
                     currentExpression.toSpdx(Strictness.ALLOW_CURRENT)
                     currentExpressionWithException.toSpdx(Strictness.ALLOW_CURRENT)
+                }
+            }
+        }
+
+        "An SpdxExpression with a LicenseRef exception" should {
+            val licenseRefWithLicenseRefException = "LicenseRef-ort-license WITH LicenseRef-ort-exception"
+            val licenseRefWithLicenseRefException2 = "LicenseRef-ort-license WITH LicenseRef-ort-exception-2.0"
+            val licenseRefWithLicenseRef = "LicenseRef-ort-license WITH LicenseRef-ort-license"
+
+            "be valid in lenient mode" {
+                assertSoftly {
+                    licenseRefWithLicenseRefException.toSpdx(Strictness.ALLOW_ANY)
+                    licenseRefWithLicenseRefException2.toSpdx(Strictness.ALLOW_ANY)
+                    licenseRefWithLicenseRef.toSpdx(Strictness.ALLOW_ANY)
+                }
+            }
+
+            "be invalid in deprecated mode" {
+                assertSoftly {
+                    shouldThrow<SpdxException> {
+                        licenseRefWithLicenseRefException.toSpdx(Strictness.ALLOW_DEPRECATED)
+                    }
+
+                    shouldThrow<SpdxException> {
+                        licenseRefWithLicenseRefException2.toSpdx(Strictness.ALLOW_DEPRECATED)
+                    }
+
+                    shouldThrow<SpdxException> {
+                        licenseRefWithLicenseRef.toSpdx(Strictness.ALLOW_DEPRECATED)
+                    }
+                }
+            }
+
+            "be invalid in strict mode" {
+                assertSoftly {
+                    shouldThrow<SpdxException> {
+                        licenseRefWithLicenseRefException.toSpdx(Strictness.ALLOW_CURRENT)
+                    }
+
+                    shouldThrow<SpdxException> {
+                        licenseRefWithLicenseRefException2.toSpdx(Strictness.ALLOW_CURRENT)
+                    }
+
+                    shouldThrow<SpdxException> {
+                        licenseRefWithLicenseRef.toSpdx(Strictness.ALLOW_CURRENT)
+                    }
+                }
+            }
+
+            "be valid when allowing LicenseRef exceptions" {
+                assertSoftly {
+                    licenseRefWithLicenseRefException.toSpdx(Strictness.ALLOW_LICENSEREF_EXCEPTIONS)
+                    licenseRefWithLicenseRefException2.toSpdx(Strictness.ALLOW_LICENSEREF_EXCEPTIONS)
+
+                    shouldThrow<SpdxException> {
+                        licenseRefWithLicenseRef.toSpdx(Strictness.ALLOW_LICENSEREF_EXCEPTIONS)
+                    }
                 }
             }
         }
@@ -616,10 +673,4 @@ class SpdxExpressionTest : WordSpec() {
 }
 
 private fun beString(expected: String): Matcher<SpdxExpression> =
-    neverNullMatcher { spdxExpression ->
-        MatcherResult(
-            spdxExpression.toString() == expected,
-            "SPDX expression ${spdxExpression.show().value} should be $expected",
-            "SPDX expression ${spdxExpression.show().value} should not be $expected"
-        )
-    }
+    neverNullMatcher { spdxExpression -> be(expected).test(spdxExpression.toString()) }

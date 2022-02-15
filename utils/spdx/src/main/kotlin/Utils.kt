@@ -29,6 +29,7 @@ import java.security.MessageDigest
 
 import org.ossreviewtoolkit.utils.common.Os
 import org.ossreviewtoolkit.utils.common.VCS_DIRECTORIES
+import org.ossreviewtoolkit.utils.common.calculateHash
 import org.ossreviewtoolkit.utils.common.isSymbolicLink
 import org.ossreviewtoolkit.utils.common.realFile
 import org.ossreviewtoolkit.utils.common.toHexString
@@ -58,12 +59,13 @@ private val scanCodeLicenseTextDir by lazy {
 
     sequenceOf(
         "src/licensedcode/data/licenses",
+        "../src/licensedcode/data/licenses",
         "../site-packages/licensedcode/data/licenses",
         "../lib/site-packages/licensedcode/data/licenses",
         *candidates.toTypedArray()
-    ).mapNotNull { relativePath ->
+    ).firstNotNullOfOrNull { relativePath ->
         scanCodeDir?.resolve(relativePath)?.takeIf { it.isDirectory }
-    }.firstOrNull()
+    }
 }
 
 /**
@@ -91,26 +93,7 @@ fun calculatePackageVerificationCode(sha1sums: Sequence<String>, excludes: Seque
  */
 @JvmName("calculatePackageVerificationCodeForFiles")
 fun calculatePackageVerificationCode(files: Sequence<File>, excludes: Sequence<String> = emptySequence()): String =
-    calculatePackageVerificationCode(files.map { sha1sum(it) }, excludes)
-
-/**
- * Return the SHA-1 sum of the given file as hex string.
- */
-private fun sha1sum(file: File): String =
-    file.inputStream().use { inputStream ->
-        // 4MB has been chosen rather arbitrary hoping that it provides a good enough performance while not consuming
-        // a lot of memory at the same time, also considering that this function could potentially be run on multiple
-        // threads in parallel.
-        val buffer = ByteArray(4 * 1024 * 1024)
-        val digest = MessageDigest.getInstance("SHA-1")
-
-        var length: Int
-        while (inputStream.read(buffer).also { length = it } > 0) {
-            digest.update(buffer, 0, length)
-        }
-
-        digest.digest().toHexString()
-    }
+    calculatePackageVerificationCode(files.map { calculateHash(it).toHexString() }, excludes)
 
 /**
  * Calculate the [SPDX package verification code][1] for all files in a [directory]. If [directory] points to a file
@@ -163,11 +146,11 @@ fun getLicenseTextReader(
 ): (() -> String)? {
     return if (id.startsWith(LICENSE_REF_PREFIX)) {
         getLicenseTextResource(id)?.let { { it.readText() } }
-            ?: addScanCodeLicenseTextsDir(licenseTextDirectories).asSequence().mapNotNull {
+            ?: addScanCodeLicenseTextsDir(licenseTextDirectories).asSequence().firstNotNullOfOrNull {
                 getLicenseTextFile(id, it)?.let { file -> { file.readText() } }
-            }.firstOrNull()
+            }
     } else {
-        SpdxLicense.forId(id)?.let { { it.text } }
+        SpdxLicense.forId(id.removeSuffix("+"))?.let { { it.text } }
             ?: SpdxLicenseException.forId(id)?.takeIf { handleExceptions }?.let { { it.text } }
     }
 }
@@ -179,14 +162,18 @@ private val LICENSE_REF_FILENAME_REGEX by lazy { Regex("^LicenseRef-\\w+-") }
 
 private fun getLicenseTextFile(id: String, dir: File): File? =
     id.replace(LICENSE_REF_FILENAME_REGEX, "").let { idWithoutLicenseRefNamespace ->
-        sequenceOf(
+        listOfNotNull(
             id,
             id.removePrefix("LicenseRef-"),
             idWithoutLicenseRefNamespace,
-            "$idWithoutLicenseRefNamespace.LICENSE"
-        ).mapNotNull { filename ->
+            "$idWithoutLicenseRefNamespace.LICENSE",
+            "x11-xconsortium_veillard.LICENSE".takeIf {
+                // Work around for https://github.com/nexB/scancode-toolkit/issues/2813.
+                id == "LicenseRef-scancode-x11-xconsortium-veillard"
+            }
+        ).firstNotNullOfOrNull { filename ->
             dir.resolve(filename).takeIf { it.isFile }
-        }.firstOrNull()
+        }
     }
 
 private fun addScanCodeLicenseTextsDir(licenseTextDirectories: List<File>): List<File> =

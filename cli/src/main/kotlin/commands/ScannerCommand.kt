@@ -39,11 +39,8 @@ import com.github.ajalt.clikt.parameters.options.split
 import com.github.ajalt.clikt.parameters.types.enum
 import com.github.ajalt.clikt.parameters.types.file
 
-import java.io.File
-
 import kotlinx.coroutines.runBlocking
 
-import org.ossreviewtoolkit.cli.DataEntity
 import org.ossreviewtoolkit.cli.GlobalOptions
 import org.ossreviewtoolkit.cli.utils.OPTION_GROUP_INPUT
 import org.ossreviewtoolkit.cli.utils.SeverityStats
@@ -53,17 +50,19 @@ import org.ossreviewtoolkit.cli.utils.readOrtResult
 import org.ossreviewtoolkit.cli.utils.writeOrtResult
 import org.ossreviewtoolkit.model.FileFormat
 import org.ossreviewtoolkit.model.OrtResult
+import org.ossreviewtoolkit.model.PackageType
 import org.ossreviewtoolkit.model.config.ClearlyDefinedStorageConfiguration
 import org.ossreviewtoolkit.model.config.FileBasedStorageConfiguration
 import org.ossreviewtoolkit.model.config.OrtConfiguration
 import org.ossreviewtoolkit.model.config.PostgresStorageConfiguration
+import org.ossreviewtoolkit.model.config.ProvenanceStorageConfiguration
 import org.ossreviewtoolkit.model.config.ScanStorageConfiguration
 import org.ossreviewtoolkit.model.config.StorageType
 import org.ossreviewtoolkit.model.config.Sw360StorageConfiguration
 import org.ossreviewtoolkit.model.utils.DatabaseUtils
 import org.ossreviewtoolkit.model.utils.DefaultResolutionProvider
 import org.ossreviewtoolkit.model.utils.mergeLabels
-import org.ossreviewtoolkit.scanner.LocalScanner
+import org.ossreviewtoolkit.scanner.PathScanner
 import org.ossreviewtoolkit.scanner.ScanResultsStorage
 import org.ossreviewtoolkit.scanner.Scanner
 import org.ossreviewtoolkit.scanner.TOOL_NAME
@@ -72,13 +71,21 @@ import org.ossreviewtoolkit.scanner.experimental.DefaultPackageProvenanceResolve
 import org.ossreviewtoolkit.scanner.experimental.DefaultProvenanceDownloader
 import org.ossreviewtoolkit.scanner.experimental.DefaultWorkingTreeCache
 import org.ossreviewtoolkit.scanner.experimental.ExperimentalScanner
+import org.ossreviewtoolkit.scanner.experimental.FileBasedNestedProvenanceStorage
+import org.ossreviewtoolkit.scanner.experimental.FileBasedPackageProvenanceStorage
+import org.ossreviewtoolkit.scanner.experimental.NestedProvenanceStorage
+import org.ossreviewtoolkit.scanner.experimental.PackageProvenanceStorage
+import org.ossreviewtoolkit.scanner.experimental.PostgresNestedProvenanceStorage
+import org.ossreviewtoolkit.scanner.experimental.PostgresPackageProvenanceStorage
 import org.ossreviewtoolkit.scanner.experimental.ProvenanceBasedFileStorage
 import org.ossreviewtoolkit.scanner.experimental.ProvenanceBasedPostgresStorage
 import org.ossreviewtoolkit.scanner.experimental.ScanStorage
+import org.ossreviewtoolkit.scanner.experimental.ScannerWrapper
 import org.ossreviewtoolkit.scanner.scanOrtResult
 import org.ossreviewtoolkit.scanner.scanners.Askalono
 import org.ossreviewtoolkit.scanner.scanners.BoyterLc
 import org.ossreviewtoolkit.scanner.scanners.Licensee
+import org.ossreviewtoolkit.scanner.scanners.fossid.FossId
 import org.ossreviewtoolkit.scanner.scanners.scancode.ScanCode
 import org.ossreviewtoolkit.scanner.storages.ClearlyDefinedStorage
 import org.ossreviewtoolkit.scanner.storages.FileBasedStorage
@@ -149,11 +156,12 @@ class ScannerCommand : CliktCommand(name = "scan", help = "Run external license 
                 "scanned with the same scanner as specified by '--scanner'."
     ).convertToScanner()
 
-    private val entities by option(
-        "--entities", "-e",
-        help = "The data entities from the ORT file's analyzer result to limit scans to. If not specified, all data " +
-                "entities are scanned."
-    ).enum<DataEntity>().split(",").default(enumValues<DataEntity>().asList())
+    private val packageTypes by option(
+        "--package-types",
+        help = "A comma-separated list of the package types from the ORT file's analyzer result to limit scans to. " +
+                "If not specified, all package types are scanned. Possible values are: " +
+                PackageType.values().joinToString { it.name }
+    ).enum<PackageType>().split(",").default(enumValues<PackageType>().asList())
 
     private val skipExcluded by option(
         "--skip-excluded",
@@ -180,8 +188,6 @@ class ScannerCommand : CliktCommand(name = "scan", help = "Run external license 
     private val globalOptionsForSubcommands by requireObject<GlobalOptions>()
 
     override fun run() {
-        val nativeOutputDir = outputDir.resolve("native-scan-results")
-
         val outputFiles = outputFormats.mapTo(mutableSetOf()) { format ->
             outputDir.resolve("scan-result.${format.fileExtension}")
         }
@@ -191,10 +197,6 @@ class ScannerCommand : CliktCommand(name = "scan", help = "Run external license 
             if (existingOutputFiles.isNotEmpty()) {
                 throw UsageError("None of the output files $existingOutputFiles must exist yet.", statusCode = 2)
             }
-
-            if (nativeOutputDir.exists() && nativeOutputDir.list().isNotEmpty()) {
-                throw UsageError("The directory '$nativeOutputDir' must not contain any files yet.", statusCode = 2)
-            }
         }
 
         val config = globalOptionsForSubcommands.config
@@ -202,7 +204,7 @@ class ScannerCommand : CliktCommand(name = "scan", help = "Run external license 
         val ortResult = if (experimental) {
             runExperimental(config)
         } else {
-            run(nativeOutputDir, config)
+            run(config)
         }.mergeLabels(labels)
 
         // Write the result.
@@ -224,7 +226,7 @@ class ScannerCommand : CliktCommand(name = "scan", help = "Run external license 
         severityStats.print().conclude(config.severeIssueThreshold, 2)
     }
 
-    private fun run(nativeOutputDir: File, config: OrtConfiguration): OrtResult {
+    private fun run(config: OrtConfiguration): OrtResult {
         // Configure the scan storage, which is common to all scanners.
         ScanResultsStorage.configure(config.scanner)
 
@@ -245,57 +247,62 @@ class ScannerCommand : CliktCommand(name = "scan", help = "Run external license 
 
         // Configure the package and project scanners.
         val defaultScanner = scannerFactory.create(config.scanner, config.downloader)
-        val packageScanner = defaultScanner.takeIf { DataEntity.PACKAGES in entities }
+        val packageScanner = defaultScanner.takeIf { PackageType.PACKAGE in packageTypes }
         val projectScanner = (projectScannerFactory?.create(config.scanner, config.downloader) ?: defaultScanner)
-            .takeIf { DataEntity.PROJECTS in entities }
+            .takeIf { PackageType.PROJECT in packageTypes }
 
         if (projectScanner != packageScanner) {
             if (projectScanner != null) {
-                println("Using project scanner '${projectScanner.scannerName}'.")
+                println("Using project scanner '${projectScanner.scannerName}' version ${projectScanner.version}.")
             } else {
                 println("Projects will not be scanned.")
             }
 
             if (packageScanner != null) {
-                println("Using package scanner '${packageScanner.scannerName}'.")
+                println("Using package scanner '${packageScanner.scannerName}' version ${packageScanner.version}.")
             } else {
                 println("Packages will not be scanned.")
             }
         } else {
-            println("Using scanner '${defaultScanner.scannerName}'.")
+            println("Using scanner '${defaultScanner.scannerName}' version ${defaultScanner.version}.")
         }
 
         // Perform the scan.
         return if (input.isFile) {
             val ortResult = readOrtResult(input)
-            scanOrtResult(packageScanner, projectScanner, ortResult, nativeOutputDir, skipExcluded)
+            scanOrtResult(packageScanner, projectScanner, ortResult, skipExcluded)
         } else {
-            require(projectScanner is LocalScanner) {
-                "To scan local files the chosen project scanner must be a local scanner."
+            require(projectScanner is PathScanner) {
+                "For scanning paths the chosen project scanner must be a PathScanner."
             }
 
-            projectScanner.scanPath(
-                inputPath = input,
-                outputDirectory = nativeOutputDir
-            )
+            projectScanner.scanPath(input)
         }
     }
 
     private fun runExperimental(config: OrtConfiguration): OrtResult {
-        // TODO: The experimental scanner supports using multiple scanner wrappers at once, for now use only one to stay
-        //       compatible with the existing scanner command. Once the experimental flag is removed this command can
-        //       support multiple scanners and use the proper ScannerWrapperFactories.
-        val scannerWrapper = when (scannerFactory.scannerName) {
-            "Askalono" -> Askalono.Factory().create(config.scanner, config.downloader)
-            "BoyterLc" -> BoyterLc.Factory().create(config.scanner, config.downloader)
-            "Licensee" -> Licensee.Factory().create(config.scanner, config.downloader)
-            "ScanCode" -> ScanCode.Factory().create(config.scanner, config.downloader)
-            else -> {
-                throw IllegalArgumentException(
-                    "The scanner ${scannerFactory.scannerName} is not supported by the experimental scanner."
-                )
+        // TODO: The experimental scanner supports using multiple scanner wrappers for projects and packages at once,
+        //       for now use only one for each to stay compatible with the existing scanner command. Once the
+        //       experimental flag is removed this command can support multiple scanners and use the proper
+        //       ScannerWrapperFactories.
+        fun createScannerWrapper(name: String): ScannerWrapper =
+            when (name) {
+                "Askalono" -> Askalono.Factory().create(config.scanner, config.downloader)
+                "BoyterLc" -> BoyterLc.Factory().create(config.scanner, config.downloader)
+                "FossId" -> FossId.Factory().create(config.scanner, config.downloader)
+                "Licensee" -> Licensee.Factory().create(config.scanner, config.downloader)
+                "ScanCode" -> ScanCode.Factory().create(config.scanner, config.downloader)
+                else -> {
+                    throw IllegalArgumentException(
+                        "The scanner ${scannerFactory.scannerName} is not supported by the experimental scanner."
+                    )
+                }
             }
-        }
+
+        val packageScannerWrapper =
+            scannerFactory.scannerName.takeIf { PackageType.PACKAGE in packageTypes }?.let { createScannerWrapper(it) }
+        val projectScannerWrapper = (projectScannerFactory?.scannerName ?: scannerFactory.scannerName)
+            .takeIf { PackageType.PROJECT in packageTypes }?.let { createScannerWrapper(it) }
 
         val storages = config.scanner.storages.orEmpty().mapValues { createStorage(it.value) }
 
@@ -308,6 +315,8 @@ class ScannerCommand : CliktCommand(name = "scan", help = "Run external license 
         val writers = config.scanner.storageWriters.orEmpty().map { resolve(it) }
             .takeIf { it.isNotEmpty() } ?: listOf(defaultStorage)
 
+        val packageProvenanceStorage = createPackageProvenanceStorage(config.scanner.provenanceStorage)
+        val nestedProvenanceStorage = createNestedProvenanceStorage(config.scanner.provenanceStorage)
         val workingTreeCache = DefaultWorkingTreeCache()
 
         try {
@@ -317,14 +326,20 @@ class ScannerCommand : CliktCommand(name = "scan", help = "Run external license 
                 provenanceDownloader = DefaultProvenanceDownloader(config.downloader, workingTreeCache),
                 storageReaders = readers,
                 storageWriters = writers,
-                packageProvenanceResolver = DefaultPackageProvenanceResolver(workingTreeCache),
-                nestedProvenanceResolver = DefaultNestedProvenanceResolver(workingTreeCache),
-                scannerWrappers = listOf(scannerWrapper)
+                packageProvenanceResolver = DefaultPackageProvenanceResolver(
+                    packageProvenanceStorage,
+                    workingTreeCache
+                ),
+                nestedProvenanceResolver = DefaultNestedProvenanceResolver(nestedProvenanceStorage, workingTreeCache),
+                scannerWrappers = mapOf(
+                    PackageType.PACKAGE to listOfNotNull(packageScannerWrapper),
+                    PackageType.PROJECT to listOfNotNull(projectScannerWrapper)
+                )
             )
 
             val ortResult = readOrtResult(input)
             return runBlocking {
-                scanner.scan(ortResult)
+                scanner.scan(ortResult, skipExcluded)
             }
         } finally {
             runBlocking { workingTreeCache.shutdown() }
@@ -364,3 +379,31 @@ private fun createPostgresStorage(config: PostgresStorageConfiguration) =
 private fun createClearlyDefinedStorage(config: ClearlyDefinedStorageConfiguration) = ClearlyDefinedStorage(config)
 
 private fun createSw360Storage(config: Sw360StorageConfiguration) = Sw360Storage(config)
+
+private fun createPackageProvenanceStorage(config: ProvenanceStorageConfiguration?): PackageProvenanceStorage {
+    config?.fileStorage?.let { fileStorageConfiguration ->
+        return FileBasedPackageProvenanceStorage(fileStorageConfiguration.createFileStorage())
+    }
+
+    config?.postgresStorage?.let { postgresStorageConfiguration ->
+        return PostgresPackageProvenanceStorage(DatabaseUtils.createHikariDataSource(postgresStorageConfiguration))
+    }
+
+    return FileBasedPackageProvenanceStorage(
+        LocalFileStorage(ortDataDirectory.resolve("$TOOL_NAME/package_provenance"))
+    )
+}
+
+private fun createNestedProvenanceStorage(config: ProvenanceStorageConfiguration?): NestedProvenanceStorage {
+    config?.fileStorage?.let { fileStorageConfiguration ->
+        return FileBasedNestedProvenanceStorage(fileStorageConfiguration.createFileStorage())
+    }
+
+    config?.postgresStorage?.let { postgresStorageConfiguration ->
+        return PostgresNestedProvenanceStorage(DatabaseUtils.createHikariDataSource(postgresStorageConfiguration))
+    }
+
+    return FileBasedNestedProvenanceStorage(
+        LocalFileStorage(ortDataDirectory.resolve("$TOOL_NAME/nested_provenance"))
+    )
+}

@@ -283,15 +283,13 @@ class NodeSupportTest : WordSpec() {
     private lateinit var tempDir: File
     private val definitionFiles = mutableSetOf<File>()
 
-    override fun beforeTest(testCase: TestCase) {
-        super.beforeTest(testCase)
+    override fun beforeEach(testCase: TestCase) {
         tempDir = createTestTempDir()
         definitionFiles.clear()
     }
 
-    override fun afterTest(testCase: TestCase, result: TestResult) {
+    override fun afterEach(testCase: TestCase, result: TestResult) {
         definitionFiles.clear()
-        super.afterTest(testCase, result)
     }
 
     private fun setupProject(

@@ -20,11 +20,12 @@
 
 package org.ossreviewtoolkit.scanner.experimental
 
-import com.vdurmont.semver4j.Semver
-
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.WordSpec
+import io.kotest.matchers.maps.beEmpty
 import io.kotest.matchers.should
+import io.kotest.matchers.shouldBe
+import io.kotest.matchers.shouldNot
 
 import io.mockk.every
 import io.mockk.mockk
@@ -41,6 +42,7 @@ import org.ossreviewtoolkit.model.Identifier
 import org.ossreviewtoolkit.model.KnownProvenance
 import org.ossreviewtoolkit.model.LicenseFinding
 import org.ossreviewtoolkit.model.Package
+import org.ossreviewtoolkit.model.PackageType
 import org.ossreviewtoolkit.model.Provenance
 import org.ossreviewtoolkit.model.RemoteArtifact
 import org.ossreviewtoolkit.model.RepositoryProvenance
@@ -54,10 +56,12 @@ import org.ossreviewtoolkit.model.VcsInfo
 import org.ossreviewtoolkit.model.VcsType
 import org.ossreviewtoolkit.model.config.DownloaderConfiguration
 import org.ossreviewtoolkit.model.config.ScannerConfiguration
+import org.ossreviewtoolkit.model.config.ScannerOptions
 import org.ossreviewtoolkit.model.yamlMapper
 import org.ossreviewtoolkit.scanner.ScannerCriteria
 import org.ossreviewtoolkit.utils.core.createOrtTempDir
 import org.ossreviewtoolkit.utils.test.containExactly
+import org.ossreviewtoolkit.utils.test.shouldNotBeNull
 
 class ExperimentalScannerTest : WordSpec({
     "Creating the experimental scanner" should {
@@ -68,34 +72,81 @@ class ExperimentalScannerTest : WordSpec({
         }
     }
 
-    "Scanning with a package based remote scanner" should {
+    "Scanning with different scanners for projects and packages" should {
+        "Use the correct scanners for each data entity" {
+            val pkgWithArtifact = Package.new(id = "artifact").withValidSourceArtifact()
+            val packageScannerWrapper = FakePackageScannerWrapper(name = "package scanner")
+            val projectScannerWrapper = FakePackageScannerWrapper(name = "project scanner")
+            val scanner = createScanner(
+                packageScannerWrappers = listOf(packageScannerWrapper),
+                projectScannerWrappers = listOf(projectScannerWrapper)
+            )
+
+            val packageContext = createContext(type = PackageType.PACKAGE)
+            val projectContext = createContext(type = PackageType.PROJECT)
+
+            scanner.scan(setOf(pkgWithArtifact), packageContext)[pkgWithArtifact] shouldNotBeNull {
+                scanResults shouldNot beEmpty()
+                scanResults.values.flatten().forEach { it.scanner.name shouldBe "package scanner" }
+            }
+
+            scanner.scan(setOf(pkgWithArtifact), projectContext)[pkgWithArtifact] shouldNotBeNull {
+                scanResults shouldNot beEmpty()
+                scanResults.values.flatten().forEach { it.scanner.name shouldBe "project scanner" }
+            }
+        }
+
+        "Not scan projects if no scanner wrapper for projects is configured" {
+            val pkgWithArtifact = Package.new(id = "artifact").withValidSourceArtifact()
+            val scannerWrapper = FakePackageScannerWrapper()
+            val scanner = createScanner(
+                packageScannerWrappers = listOf(scannerWrapper),
+                projectScannerWrappers = emptyList()
+            )
+
+            scanner.scan(setOf(pkgWithArtifact), createContext(type = PackageType.PROJECT)) should beEmpty()
+        }
+
+        "Not scan packages if no scanner wrapper for packages is configured" {
+            val pkgWithArtifact = Package.new(id = "artifact").withValidSourceArtifact()
+            val scannerWrapper = FakePackageScannerWrapper()
+            val scanner = createScanner(
+                packageScannerWrappers = emptyList(),
+                projectScannerWrappers = listOf(scannerWrapper)
+            )
+
+            scanner.scan(setOf(pkgWithArtifact), createContext()) should beEmpty()
+        }
+    }
+
+    "Scanning with a package scanner" should {
         "return a scan result for each package" {
             val pkgWithArtifact = Package.new(id = "artifact").withValidSourceArtifact()
             val pkgWithVcs = Package.new(id = "repository").withValidVcs()
-            val scannerWrapper = spyk(FakePackageBasedRemoteScannerWrapper())
-            val scanner = createScanner(scannerWrappers = listOf(scannerWrapper))
+            val scannerWrapper = spyk(FakePackageScannerWrapper())
+            val scanner = createScanner(packageScannerWrappers = listOf(scannerWrapper))
 
-            every { scannerWrapper.scanPackage(pkgWithArtifact) } returns
-                    createRemoteScanResult(pkgWithArtifact.artifactProvenance(), scannerWrapper.details)
-            every { scannerWrapper.scanPackage(pkgWithVcs) } returns
-                    createRemoteScanResult(pkgWithVcs.repositoryProvenance(), scannerWrapper.details)
+            every { scannerWrapper.scanPackage(pkgWithArtifact, any()) } returns
+                    createScanResult(pkgWithArtifact.artifactProvenance(), scannerWrapper.details)
+            every { scannerWrapper.scanPackage(pkgWithVcs, any()) } returns
+                    createScanResult(pkgWithVcs.repositoryProvenance(), scannerWrapper.details)
 
-            val result = scanner.scan(setOf(pkgWithArtifact, pkgWithVcs))
+            val result = scanner.scan(setOf(pkgWithArtifact, pkgWithVcs), createContext())
 
             result should containExactly(
-                pkgWithArtifact to createRemoteNestedScanResult(
+                pkgWithArtifact to createNestedScanResult(
                     provenance = pkgWithArtifact.artifactProvenance(),
                     scannerDetails = scannerWrapper.details
                 ),
-                pkgWithVcs to createRemoteNestedScanResult(
+                pkgWithVcs to createNestedScanResult(
                     provenance = pkgWithVcs.repositoryProvenance(),
                     scannerDetails = scannerWrapper.details
                 )
             )
 
             verify(exactly = 1) {
-                scannerWrapper.scanPackage(pkgWithArtifact)
-                scannerWrapper.scanPackage(pkgWithVcs)
+                scannerWrapper.scanPackage(pkgWithArtifact, any())
+                scannerWrapper.scanPackage(pkgWithVcs, any())
             }
         }
 
@@ -103,41 +154,41 @@ class ExperimentalScannerTest : WordSpec({
             val pkgWithArtifact = Package.new(id = "artifact").withValidSourceArtifact()
             val pkgWithVcs = Package.new(id = "repository").withValidVcs()
             val provenanceDownloader = mockk<ProvenanceDownloader>()
-            val scannerWrapper = FakePackageBasedRemoteScannerWrapper()
+            val scannerWrapper = FakePackageScannerWrapper()
             val scanner = createScanner(
                 provenanceDownloader = provenanceDownloader,
-                scannerWrappers = listOf(scannerWrapper)
+                packageScannerWrappers = listOf(scannerWrapper)
             )
 
-            scanner.scan(setOf(pkgWithArtifact, pkgWithVcs))
+            scanner.scan(setOf(pkgWithArtifact, pkgWithVcs), createContext())
 
             verify(exactly = 0) { provenanceDownloader.download(any()) }
         }
     }
 
-    "Scanning with a provenance based remote scanner" should {
+    "Scanning with a provenance scanner" should {
         "return a scan result for each provenance" {
             val pkgWithArtifact = Package.new(id = "artifact").withValidSourceArtifact()
             val pkgWithVcs = Package.new(id = "repository").withValidVcs()
-            val scannerWrapper = spyk(FakeProvenanceBasedRemoteScannerWrapper())
-            val scanner = createScanner(scannerWrappers = listOf(scannerWrapper))
+            val scannerWrapper = spyk(FakeProvenanceScannerWrapper())
+            val scanner = createScanner(packageScannerWrappers = listOf(scannerWrapper))
 
-            val result = scanner.scan(setOf(pkgWithArtifact, pkgWithVcs))
+            val result = scanner.scan(setOf(pkgWithArtifact, pkgWithVcs), createContext())
 
             result should containExactly(
-                pkgWithArtifact to createRemoteNestedScanResult(
+                pkgWithArtifact to createNestedScanResult(
                     provenance = pkgWithArtifact.artifactProvenance(),
                     scannerDetails = scannerWrapper.details
                 ),
-                pkgWithVcs to createRemoteNestedScanResult(
+                pkgWithVcs to createNestedScanResult(
                     provenance = pkgWithVcs.repositoryProvenance(),
                     scannerDetails = scannerWrapper.details
                 )
             )
 
             verify(exactly = 1) {
-                scannerWrapper.scanProvenance(pkgWithArtifact.artifactProvenance())
-                scannerWrapper.scanProvenance(pkgWithVcs.repositoryProvenance())
+                scannerWrapper.scanProvenance(pkgWithArtifact.artifactProvenance(), any())
+                scannerWrapper.scanProvenance(pkgWithVcs.repositoryProvenance(), any())
             }
         }
 
@@ -145,54 +196,54 @@ class ExperimentalScannerTest : WordSpec({
             val pkgWithArtifact = Package.new(id = "artifact").withValidSourceArtifact()
             val pkgWithVcs = Package.new(id = "repository").withValidVcs()
             val provenanceDownloader = mockk<ProvenanceDownloader>()
-            val scannerWrapper = FakeProvenanceBasedRemoteScannerWrapper()
+            val scannerWrapper = FakeProvenanceScannerWrapper()
             val scanner = createScanner(
                 provenanceDownloader = provenanceDownloader,
-                scannerWrappers = listOf(scannerWrapper)
+                packageScannerWrappers = listOf(scannerWrapper)
             )
 
-            scanner.scan(setOf(pkgWithArtifact, pkgWithVcs))
+            scanner.scan(setOf(pkgWithArtifact, pkgWithVcs), createContext())
 
             verify(exactly = 0) { provenanceDownloader.download(any()) }
         }
     }
 
-    "scanning with a local scanner" should {
+    "scanning with a path scanner" should {
         "return a scan result for each provenance" {
             val pkgWithArtifact = Package.new(id = "artifact").withValidSourceArtifact()
             val pkgWithVcs = Package.new(id = "repository").withValidVcs()
-            val scannerWrapper = spyk(FakeLocalScannerWrapper())
-            val scanner = createScanner(scannerWrappers = listOf(scannerWrapper))
+            val scannerWrapper = spyk(FakePathScannerWrapper())
+            val scanner = createScanner(packageScannerWrappers = listOf(scannerWrapper))
 
-            val result = scanner.scan(setOf(pkgWithArtifact, pkgWithVcs))
+            val result = scanner.scan(setOf(pkgWithArtifact, pkgWithVcs), createContext())
 
             result should containExactly(
-                pkgWithArtifact to createLocalNestedScanResult(
+                pkgWithArtifact to createNestedScanResult(
                     provenance = pkgWithArtifact.artifactProvenance(),
                     scannerDetails = scannerWrapper.details
                 ),
-                pkgWithVcs to createLocalNestedScanResult(
+                pkgWithVcs to createNestedScanResult(
                     provenance = pkgWithVcs.repositoryProvenance(),
                     scannerDetails = scannerWrapper.details
                 )
             )
 
             verify(exactly = 2) {
-                scannerWrapper.scanPath(any())
+                scannerWrapper.scanPath(any(), any())
             }
         }
 
         "try to download the source code" {
             val pkgWithArtifact = Package.new(id = "artifact").withValidSourceArtifact()
             val pkgWithVcs = Package.new(id = "repository").withValidVcs()
-            val provenanceDownloader = spyk(FakeProvenanceDownloader())
-            val scannerWrapper = FakeLocalScannerWrapper()
+            val scannerWrapper = FakePathScannerWrapper()
+            val provenanceDownloader = spyk(FakeProvenanceDownloader("${scannerWrapper.name}.txt"))
             val scanner = createScanner(
                 provenanceDownloader = provenanceDownloader,
-                scannerWrappers = listOf(scannerWrapper)
+                packageScannerWrappers = listOf(scannerWrapper)
             )
 
-            scanner.scan(setOf(pkgWithArtifact, pkgWithVcs))
+            scanner.scan(setOf(pkgWithArtifact, pkgWithVcs), createContext())
 
             verify(exactly = 1) {
                 provenanceDownloader.download(pkgWithArtifact.artifactProvenance())
@@ -204,7 +255,7 @@ class ExperimentalScannerTest : WordSpec({
     "scanning with a package based storage reader" should {
         "prefer a stored result over a new scan" {
             val pkgWithArtifact = Package.new(id = "artifact").withValidSourceArtifact()
-            val scannerWrapper = spyk(FakePackageBasedRemoteScannerWrapper())
+            val scannerWrapper = spyk(FakePackageScannerWrapper())
             val reader = spyk(FakePackageBasedStorageReader(scannerWrapper.details))
 
             every { reader.read(pkgWithArtifact, any()) } returns listOf(
@@ -213,10 +264,10 @@ class ExperimentalScannerTest : WordSpec({
 
             val scanner = createScanner(
                 storageReaders = listOf(reader),
-                scannerWrappers = listOf(scannerWrapper)
+                packageScannerWrappers = listOf(scannerWrapper)
             )
 
-            val result = scanner.scan(setOf(pkgWithArtifact))
+            val result = scanner.scan(setOf(pkgWithArtifact), createContext())
 
             result should containExactly(
                 pkgWithArtifact to createStoredNestedScanResult(
@@ -226,26 +277,26 @@ class ExperimentalScannerTest : WordSpec({
             )
 
             verify(exactly = 0) {
-                scannerWrapper.scanPackage(pkgWithArtifact)
+                scannerWrapper.scanPackage(pkgWithArtifact, any())
             }
         }
 
         "start a scan if no stored result is available" {
             val pkgWithArtifact = Package.new(id = "artifact").withValidSourceArtifact()
-            val scannerWrapper = spyk(FakePackageBasedRemoteScannerWrapper())
+            val scannerWrapper = spyk(FakePackageScannerWrapper())
             val reader = spyk(FakePackageBasedStorageReader(scannerWrapper.details))
 
             every { reader.read(any(), any()) } returns emptyList()
 
             val scanner = createScanner(
                 storageReaders = listOf(reader),
-                scannerWrappers = listOf(scannerWrapper)
+                packageScannerWrappers = listOf(scannerWrapper)
             )
 
-            val result = scanner.scan(setOf(pkgWithArtifact))
+            val result = scanner.scan(setOf(pkgWithArtifact), createContext())
 
             result should containExactly(
-                pkgWithArtifact to createRemoteNestedScanResult(
+                pkgWithArtifact to createNestedScanResult(
                     provenance = pkgWithArtifact.artifactProvenance(),
                     scannerDetails = scannerWrapper.details
                 )
@@ -253,7 +304,7 @@ class ExperimentalScannerTest : WordSpec({
 
             verify(exactly = 1) {
                 reader.read(pkgWithArtifact, any())
-                scannerWrapper.scanPackage(pkgWithArtifact)
+                scannerWrapper.scanPackage(pkgWithArtifact, any())
             }
         }
 
@@ -261,7 +312,7 @@ class ExperimentalScannerTest : WordSpec({
             val pkgCompletelyScanned = Package.new(id = "completely").withValidVcs().withVcsRevision("revision1")
             val pkgPartlyScanned = Package.new(id = "partly").withValidVcs().withVcsRevision("revision2")
 
-            val scannerWrapper = spyk(FakeProvenanceBasedRemoteScannerWrapper())
+            val scannerWrapper = spyk(FakeProvenanceScannerWrapper())
 
             val scannedSubRepository = RepositoryProvenance(
                 VcsInfo(VcsType.GIT, "https://example.com/scanned", "revision"),
@@ -281,12 +332,12 @@ class ExperimentalScannerTest : WordSpec({
                 subRepositories = mapOf("path1" to scannedSubRepository, "path2" to unscannedSubRepository)
             )
 
-            val nestedScanResultCompletelyScanned = createRemoteNestedScanResult(
+            val nestedScanResultCompletelyScanned = createNestedScanResult(
                 provenance = nestedProvenanceCompletelyScanned.root,
                 scannerDetails = scannerWrapper.details,
                 subRepositories = nestedProvenanceCompletelyScanned.subRepositories
             )
-            val nestedScanResultPartlyScanned = createRemoteNestedScanResult(
+            val nestedScanResultPartlyScanned = createNestedScanResult(
                 provenance = nestedProvenancePartlyScanned.root,
                 scannerDetails = scannerWrapper.details,
                 subRepositories = nestedProvenancePartlyScanned.subRepositories
@@ -308,10 +359,10 @@ class ExperimentalScannerTest : WordSpec({
             val scanner = createScanner(
                 storageReaders = listOf(reader),
                 nestedProvenanceResolver = nestedProvenanceResolver,
-                scannerWrappers = listOf(scannerWrapper)
+                packageScannerWrappers = listOf(scannerWrapper)
             )
 
-            val result = scanner.scan(setOf(pkgCompletelyScanned, pkgPartlyScanned))
+            val result = scanner.scan(setOf(pkgCompletelyScanned, pkgPartlyScanned), createContext())
 
             result should containExactly(
                 pkgCompletelyScanned to nestedScanResultCompletelyScanned,
@@ -319,11 +370,11 @@ class ExperimentalScannerTest : WordSpec({
             )
 
             verify(exactly = 0) {
-                scannerWrapper.scanProvenance(scannedSubRepository)
+                scannerWrapper.scanProvenance(scannedSubRepository, any())
             }
 
             verify(exactly = 1) {
-                scannerWrapper.scanProvenance(unscannedSubRepository)
+                scannerWrapper.scanProvenance(unscannedSubRepository, any())
             }
         }
     }
@@ -331,7 +382,7 @@ class ExperimentalScannerTest : WordSpec({
     "scanning with a provenance based storage reader" should {
         "prefer a stored result over a new scan" {
             val pkgWithArtifact = Package.new(id = "artifact").withValidSourceArtifact()
-            val scannerWrapper = spyk(FakeProvenanceBasedRemoteScannerWrapper())
+            val scannerWrapper = spyk(FakeProvenanceScannerWrapper())
             val reader = spyk(FakeProvenanceBasedStorageReader(scannerWrapper.details))
 
             every { reader.read(pkgWithArtifact.artifactProvenance()) } returns listOf(
@@ -340,10 +391,10 @@ class ExperimentalScannerTest : WordSpec({
 
             val scanner = createScanner(
                 storageReaders = listOf(reader),
-                scannerWrappers = listOf(scannerWrapper)
+                packageScannerWrappers = listOf(scannerWrapper)
             )
 
-            val result = scanner.scan(setOf(pkgWithArtifact))
+            val result = scanner.scan(setOf(pkgWithArtifact), createContext())
 
             result should containExactly(
                 pkgWithArtifact to createStoredNestedScanResult(
@@ -353,26 +404,26 @@ class ExperimentalScannerTest : WordSpec({
             )
 
             verify(exactly = 0) {
-                scannerWrapper.scanProvenance(pkgWithArtifact.artifactProvenance())
+                scannerWrapper.scanProvenance(pkgWithArtifact.artifactProvenance(), any())
             }
         }
 
         "start a scan if no stored result is available" {
             val pkgWithArtifact = Package.new(id = "artifact").withValidSourceArtifact()
-            val scannerWrapper = spyk(FakeProvenanceBasedRemoteScannerWrapper())
+            val scannerWrapper = spyk(FakeProvenanceScannerWrapper())
             val reader = spyk(FakeProvenanceBasedStorageReader(scannerWrapper.details))
 
             every { reader.read(any()) } returns emptyList()
 
             val scanner = createScanner(
                 storageReaders = listOf(reader),
-                scannerWrappers = listOf(scannerWrapper)
+                packageScannerWrappers = listOf(scannerWrapper)
             )
 
-            val result = scanner.scan(setOf(pkgWithArtifact))
+            val result = scanner.scan(setOf(pkgWithArtifact), createContext())
 
             result should containExactly(
-                pkgWithArtifact to createRemoteNestedScanResult(
+                pkgWithArtifact to createNestedScanResult(
                     pkgWithArtifact.artifactProvenance(),
                     scannerWrapper.details
                 )
@@ -380,7 +431,7 @@ class ExperimentalScannerTest : WordSpec({
 
             verify(exactly = 1) {
                 reader.read(pkgWithArtifact.artifactProvenance())
-                scannerWrapper.scanProvenance(pkgWithArtifact.artifactProvenance())
+                scannerWrapper.scanProvenance(pkgWithArtifact.artifactProvenance(), any())
             }
         }
 
@@ -388,7 +439,7 @@ class ExperimentalScannerTest : WordSpec({
             val pkgCompletelyScanned = Package.new(id = "completely").withValidVcs().withVcsRevision("revision1")
             val pkgPartlyScanned = Package.new(id = "partly").withValidVcs().withVcsRevision("revision2")
 
-            val scannerWrapper = spyk(FakeProvenanceBasedRemoteScannerWrapper())
+            val scannerWrapper = spyk(FakeProvenanceScannerWrapper())
 
             val scannedSubRepository = RepositoryProvenance(
                 VcsInfo(VcsType.GIT, "https://example.com/scanned", "revision"),
@@ -424,7 +475,7 @@ class ExperimentalScannerTest : WordSpec({
                         createStoredScanResult(scannedSubRepository, scannerWrapper.details)
                     ),
                     unscannedSubRepository to listOf(
-                        createRemoteScanResult(unscannedSubRepository, scannerWrapper.details)
+                        createScanResult(unscannedSubRepository, scannerWrapper.details)
                     )
                 )
             )
@@ -445,10 +496,10 @@ class ExperimentalScannerTest : WordSpec({
             val scanner = createScanner(
                 storageReaders = listOf(reader),
                 nestedProvenanceResolver = nestedProvenanceResolver,
-                scannerWrappers = listOf(scannerWrapper)
+                packageScannerWrappers = listOf(scannerWrapper)
             )
 
-            val result = scanner.scan(setOf(pkgCompletelyScanned, pkgPartlyScanned))
+            val result = scanner.scan(setOf(pkgCompletelyScanned, pkgPartlyScanned), createContext())
 
             result should containExactly(
                 pkgCompletelyScanned to nestedScanResultCompletelyScanned,
@@ -456,11 +507,11 @@ class ExperimentalScannerTest : WordSpec({
             )
 
             verify(exactly = 0) {
-                scannerWrapper.scanProvenance(scannedSubRepository)
+                scannerWrapper.scanProvenance(scannedSubRepository, any())
             }
 
             verify(exactly = 1) {
-                scannerWrapper.scanProvenance(unscannedSubRepository)
+                scannerWrapper.scanProvenance(unscannedSubRepository, any())
             }
         }
     }
@@ -468,37 +519,37 @@ class ExperimentalScannerTest : WordSpec({
     "scanning with a package based storage writer" should {
         "store the scan result" {
             val pkgWithArtifact = Package.new(id = "artifact").withValidSourceArtifact()
-            val scannerWrapper = FakePackageBasedRemoteScannerWrapper()
+            val scannerWrapper = FakePackageScannerWrapper()
             val writer = spyk(FakePackageBasedStorageWriter())
 
             val scanner = createScanner(
                 storageWriters = listOf(writer),
-                scannerWrappers = listOf(scannerWrapper)
+                packageScannerWrappers = listOf(scannerWrapper)
             )
 
-            scanner.scan(setOf(pkgWithArtifact))
+            scanner.scan(setOf(pkgWithArtifact), createContext())
 
             verify(exactly = 1) {
                 writer.write(
                     pkgWithArtifact,
-                    createRemoteNestedScanResult(pkgWithArtifact.artifactProvenance(), scannerWrapper.details)
+                    createNestedScanResult(pkgWithArtifact.artifactProvenance(), scannerWrapper.details)
                 )
             }
         }
 
         "not try to store the scan result if it was retrieved from a storage" {
             val pkgWithArtifact = Package.new(id = "artifact").withValidSourceArtifact()
-            val scannerWrapper = FakePackageBasedRemoteScannerWrapper()
+            val scannerWrapper = FakePackageScannerWrapper()
             val reader = FakePackageBasedStorageReader(scannerWrapper.details)
             val writer = spyk(FakePackageBasedStorageWriter())
 
             val scanner = createScanner(
                 storageReaders = listOf(reader),
                 storageWriters = listOf(writer),
-                scannerWrappers = listOf(scannerWrapper)
+                packageScannerWrappers = listOf(scannerWrapper)
             )
 
-            scanner.scan(setOf(pkgWithArtifact))
+            scanner.scan(setOf(pkgWithArtifact), createContext())
 
             verify(exactly = 0) {
                 writer.write(any(), any())
@@ -509,34 +560,56 @@ class ExperimentalScannerTest : WordSpec({
     "scanning with a provenance based storage writer" should {
         "store the scan result" {
             val pkgWithArtifact = Package.new(id = "artifact").withValidSourceArtifact()
-            val scannerWrapper = FakePackageBasedRemoteScannerWrapper()
+            val scannerWrapper = FakePackageScannerWrapper()
             val writer = spyk(FakeProvenanceBasedStorageWriter())
 
             val scanner = createScanner(
                 storageWriters = listOf(writer),
-                scannerWrappers = listOf(scannerWrapper)
+                packageScannerWrappers = listOf(scannerWrapper)
             )
 
-            scanner.scan(setOf(pkgWithArtifact))
+            scanner.scan(setOf(pkgWithArtifact), createContext())
 
             verify(exactly = 1) {
-                writer.write(createRemoteScanResult(pkgWithArtifact.artifactProvenance(), scannerWrapper.details))
+                writer.write(createScanResult(pkgWithArtifact.artifactProvenance(), scannerWrapper.details))
             }
         }
 
         "not try to store the scan result if it was retrieved from a storage" {
             val pkgWithArtifact = Package.new(id = "artifact").withValidSourceArtifact()
-            val scannerWrapper = FakePackageBasedRemoteScannerWrapper()
+            val scannerWrapper = FakePackageScannerWrapper()
             val reader = FakePackageBasedStorageReader(scannerWrapper.details)
             val writer = spyk(FakeProvenanceBasedStorageWriter())
 
             val scanner = createScanner(
                 storageReaders = listOf(reader),
                 storageWriters = listOf(writer),
-                scannerWrappers = listOf(scannerWrapper)
+                packageScannerWrappers = listOf(scannerWrapper)
             )
 
-            scanner.scan(setOf(pkgWithArtifact))
+            scanner.scan(setOf(pkgWithArtifact), createContext())
+
+            verify(exactly = 0) {
+                writer.write(any())
+            }
+        }
+    }
+
+    "scanning with a scanner that does not provide criteria" should {
+        "not store the scan results" {
+            val pkgWithArtifact = Package.new(id = "artifact").withValidSourceArtifact()
+            val scannerWrapper = spyk(FakePackageScannerWrapper())
+
+            every { scannerWrapper.criteria } returns null
+
+            val writer = spyk(FakeProvenanceBasedStorageWriter())
+
+            val scanner = createScanner(
+                storageWriters = listOf(writer),
+                packageScannerWrappers = listOf(scannerWrapper)
+            )
+
+            scanner.scan(setOf(pkgWithArtifact), createContext())
 
             verify(exactly = 0) {
                 writer.write(any())
@@ -554,57 +627,65 @@ class ExperimentalScannerTest : WordSpec({
 })
 
 /**
- * An implementation of [PackageBasedRemoteScannerWrapper] that creates empty scan results.
+ * An implementation of [PackageScannerWrapper] that creates empty scan results.
  */
-private class FakePackageBasedRemoteScannerWrapper(
+@Suppress("RedundantNullableReturnType")
+private class FakePackageScannerWrapper(
     val packageProvenanceResolver: PackageProvenanceResolver = FakePackageProvenanceResolver(),
-    val sourceCodeOriginPriority: List<SourceCodeOrigin> = listOf(SourceCodeOrigin.VCS, SourceCodeOrigin.ARTIFACT)
-) : PackageBasedRemoteScannerWrapper {
-    override val details: ScannerDetails = ScannerDetails("fake", "1.0.0", "config")
-    override val name: String = details.name
-    override val criteria: ScannerCriteria = details.toCriteria()
+    val sourceCodeOriginPriority: List<SourceCodeOrigin> = listOf(SourceCodeOrigin.VCS, SourceCodeOrigin.ARTIFACT),
+    name: String = "fake"
+) : PackageScannerWrapper {
+    override val details = ScannerDetails(name, "1.0.0", "config")
+    override val name = details.name
+    override val criteria: ScannerCriteria? = ScannerCriteria.forDetails(details)
 
-    override fun scanPackage(pkg: Package): ScanResult =
-        createRemoteScanResult(packageProvenanceResolver.resolveProvenance(pkg, sourceCodeOriginPriority), details)
+    override fun scanPackage(pkg: Package, context: ScanContext): ScanResult =
+        createScanResult(packageProvenanceResolver.resolveProvenance(pkg, sourceCodeOriginPriority), details)
+
+    override fun filterSecretOptions(options: ScannerOptions) = options
 }
 
 /**
- * An implementation of [ProvenanceBasedRemoteScannerWrapper] that creates empty scan results.
+ * An implementation of [ProvenanceScannerWrapper] that creates empty scan results.
  */
-private class FakeProvenanceBasedRemoteScannerWrapper : ProvenanceBasedRemoteScannerWrapper {
-    override val details: ScannerDetails = ScannerDetails("fake", "1.0.0", "config")
-    override val name: String = details.name
-    override val criteria: ScannerCriteria = details.toCriteria()
+private class FakeProvenanceScannerWrapper : ProvenanceScannerWrapper {
+    override val details = ScannerDetails("fake", "1.0.0", "config")
+    override val name = details.name
+    override val criteria = ScannerCriteria.forDetails(details)
 
-    override fun scanProvenance(provenance: KnownProvenance): ScanResult =
-        createRemoteScanResult(provenance, details)
+    override fun scanProvenance(provenance: KnownProvenance, context: ScanContext): ScanResult =
+        createScanResult(provenance, details)
+
+    override fun filterSecretOptions(options: ScannerOptions) = options
 }
 
 /**
- * An implementation of [LocalScannerWrapper] that creates scan results with one license finding for each file.
+ * An implementation of [PathScannerWrapper] that creates scan results with one license finding for each file.
  */
-private class FakeLocalScannerWrapper : LocalScannerWrapper {
-    override val details: ScannerDetails = ScannerDetails("fake", "1.0.0", "config")
-    override val name: String = details.name
-    override val criteria: ScannerCriteria = details.toCriteria()
+private class FakePathScannerWrapper : PathScannerWrapper {
+    override val details = ScannerDetails("fake", "1.0.0", "config")
+    override val name = details.name
+    override val criteria = ScannerCriteria.forDetails(details)
 
-    override fun scanPath(path: File): ScanSummary {
+    override fun scanPath(path: File, context: ScanContext): ScanSummary {
         val licenseFindings = path.walk().filter { it.isFile }.map { file ->
             LicenseFinding("Apache-2.0", TextLocation(file.relativeTo(path).path, 1, 2))
         }.toSortedSet()
 
         return createScanSummary(licenseFindings = licenseFindings)
     }
+
+    override fun filterSecretOptions(options: ScannerOptions) = options
 }
 
 /**
- * An implementation of [ProvenanceDownloader] that creates a file called "provenance.txt" containing the serialized
+ * An implementation of [ProvenanceDownloader] that creates a file called [filename] containing the serialized
  * provenance, instead of actually downloading the source code.
  */
-private class FakeProvenanceDownloader : ProvenanceDownloader {
+private class FakeProvenanceDownloader(val filename: String = "fake.txt") : ProvenanceDownloader {
     override fun download(provenance: KnownProvenance): File {
         // TODO: Should downloadDir be created if it does not exist?
-        val file = createOrtTempDir().resolve("provenance.txt")
+        val file = createOrtTempDir().resolve(filename)
         file.writeText(yamlMapper.writeValueAsString(provenance))
         return file.parentFile
     }
@@ -682,6 +763,11 @@ private class FakeProvenanceBasedStorageWriter : ProvenanceBasedScanStorageWrite
     override fun write(scanResult: ScanResult) = Unit
 }
 
+private fun createContext(
+    labels: Map<String, String> = emptyMap(),
+    type: PackageType = PackageType.PACKAGE
+) = ScanContext(labels, type)
+
 @Suppress("LongParameterList")
 private fun createScanner(
     scannerConfig: ScannerConfiguration = ScannerConfiguration(),
@@ -691,7 +777,8 @@ private fun createScanner(
     storageWriters: List<ScanStorageWriter> = emptyList(),
     packageProvenanceResolver: PackageProvenanceResolver = FakePackageProvenanceResolver(),
     nestedProvenanceResolver: NestedProvenanceResolver = FakeNestedProvenanceResolver(),
-    scannerWrappers: List<ScannerWrapper> = emptyList()
+    packageScannerWrappers: List<ScannerWrapper> = emptyList(),
+    projectScannerWrappers: List<ScannerWrapper> = emptyList()
 ) =
     ExperimentalScanner(
         scannerConfig,
@@ -701,15 +788,10 @@ private fun createScanner(
         storageWriters,
         packageProvenanceResolver,
         nestedProvenanceResolver,
-        scannerWrappers
-    )
-
-private fun ScannerDetails.toCriteria() =
-    ScannerCriteria(
-        regScannerName = name,
-        minVersion = Semver(version),
-        maxVersion = Semver(version),
-        configMatcher = { true }
+        mapOf(
+            PackageType.PROJECT to projectScannerWrappers,
+            PackageType.PACKAGE to packageScannerWrappers
+        )
     )
 
 private fun Package.Companion.new(type: String = "", group: String = "", id: String = "", version: String = "") =
@@ -738,18 +820,18 @@ private fun VcsInfo.Companion.valid() =
 private fun createScanSummary(licenseFindings: Set<LicenseFinding> = emptySet()) =
     ScanSummary(Instant.EPOCH, Instant.EPOCH, "", licenseFindings.toSortedSet(), sortedSetOf())
 
-private fun createRemoteScanResult(provenance: Provenance, scannerDetails: ScannerDetails) =
+private fun createScanResult(provenance: Provenance, scannerDetails: ScannerDetails) =
     ScanResult(
         provenance,
         scannerDetails,
         createScanSummary(
             licenseFindings = sortedSetOf(
-                LicenseFinding("Apache-2.0", TextLocation("remote.txt", 1, 2))
+                LicenseFinding("Apache-2.0", TextLocation("${scannerDetails.name}.txt", 1, 2))
             )
         )
     )
 
-private fun createRemoteNestedScanResult(
+private fun createNestedScanResult(
     provenance: KnownProvenance,
     scannerDetails: ScannerDetails,
     subRepositories: Map<String, RepositoryProvenance> = emptyMap()
@@ -757,27 +839,8 @@ private fun createRemoteNestedScanResult(
     NestedProvenanceScanResult(
         NestedProvenance(root = provenance, subRepositories = subRepositories),
         scanResults = mapOf(
-            provenance to listOf(createRemoteScanResult(provenance, scannerDetails))
-        ) + subRepositories.values.associateWith { listOf(createRemoteScanResult(it, scannerDetails)) }
-    )
-
-private fun createLocalScanResult(provenance: Provenance, scannerDetails: ScannerDetails) =
-    ScanResult(
-        provenance,
-        scannerDetails,
-        createScanSummary(
-            licenseFindings = setOf(
-                LicenseFinding("Apache-2.0", TextLocation("provenance.txt", 1, 2))
-            )
-        )
-    )
-
-private fun createLocalNestedScanResult(provenance: KnownProvenance, scannerDetails: ScannerDetails) =
-    NestedProvenanceScanResult(
-        NestedProvenance(root = provenance, subRepositories = emptyMap()),
-        scanResults = mapOf(
-            provenance to listOf(createLocalScanResult(provenance, scannerDetails))
-        )
+            provenance to listOf(createScanResult(provenance, scannerDetails))
+        ) + subRepositories.values.associateWith { listOf(createScanResult(it, scannerDetails)) }
     )
 
 private fun createStoredScanResult(provenance: Provenance, scannerDetails: ScannerDetails) =

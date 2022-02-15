@@ -95,15 +95,15 @@ object SpdxDocumentModelMapper {
                 homepage = pkg.homepageUrl.nullOrBlankToSpdxNone(),
                 licenseConcluded = pkg.concludedLicense.nullOrBlankToSpdxNoassertionOrNone(),
                 licenseDeclared = pkg.declaredLicensesProcessed.toSpdxDeclaredLicense(),
-                name = pkg.id.toSpdxPackageName(),
+                name = pkg.id.name,
                 summary = pkg.description.nullOrBlankToSpdxNone(),
                 versionInfo = pkg.id.version
             )
 
             val binaryPackageRelationship = SpdxRelationship(
                 spdxElementId = binaryPackage.spdxId,
-                relatedSpdxElement = rootPackage.spdxId,
-                relationshipType = SpdxRelationship.Type.DEPENDENCY_OF
+                relationshipType = SpdxRelationship.Type.DEPENDENCY_OF,
+                relatedSpdxElement = rootPackage.spdxId
             )
 
             packages += binaryPackage
@@ -114,20 +114,27 @@ object SpdxDocumentModelMapper {
                     ortResult.getScanResultsForId(curatedPackage.pkg.id).find { it.provenance is RepositoryProvenance }
                 val provenance = vcsScanResult?.provenance as? RepositoryProvenance
 
+                val (filesAnalyzed, packageVerificationCode) =
+                    if (vcsScanResult?.summary?.packageVerificationCode?.isNotEmpty() == true) {
+                        true to vcsScanResult.toSpdxPackageVerificationCode()
+                    } else {
+                        false to null
+                    }
+
                 // TODO: The copyright text contains copyrights from all scan results.
                 val vcsPackage = binaryPackage.copy(
                     spdxId = spdxPackageIdGenerator.nextId("${pkg.id.name}-vcs"),
-                    filesAnalyzed = vcsScanResult != null,
+                    filesAnalyzed = filesAnalyzed,
                     downloadLocation = pkg.vcsProcessed.toSpdxDownloadLocation(provenance?.resolvedRevision),
                     licenseConcluded = SpdxConstants.NOASSERTION,
                     licenseDeclared = SpdxConstants.NOASSERTION,
-                    packageVerificationCode = vcsScanResult?.toSpdxPackageVerificationCode()
+                    packageVerificationCode = packageVerificationCode
                 )
 
                 val vcsPackageRelationShip = SpdxRelationship(
                     spdxElementId = binaryPackage.spdxId,
-                    relatedSpdxElement = vcsPackage.spdxId,
-                    relationshipType = SpdxRelationship.Type.GENERATED_FROM
+                    relationshipType = SpdxRelationship.Type.GENERATED_FROM,
+                    relatedSpdxElement = vcsPackage.spdxId
                 )
 
                 packages += vcsPackage
@@ -138,20 +145,27 @@ object SpdxDocumentModelMapper {
                 val sourceArtifactScanResult =
                     ortResult.getScanResultsForId(curatedPackage.pkg.id).find { it.provenance is ArtifactProvenance }
 
+                val (filesAnalyzed, packageVerificationCode) =
+                    if (sourceArtifactScanResult?.summary?.packageVerificationCode?.isNotEmpty() == true) {
+                        true to sourceArtifactScanResult.toSpdxPackageVerificationCode()
+                    } else {
+                        false to null
+                    }
+
                 // TODO: The copyright text contains copyrights from all scan results.
                 val sourceArtifactPackage = binaryPackage.copy(
                     spdxId = spdxPackageIdGenerator.nextId("${curatedPackage.pkg.id.name}-source-artifact"),
-                    filesAnalyzed = sourceArtifactScanResult != null,
+                    filesAnalyzed = filesAnalyzed,
                     downloadLocation = curatedPackage.pkg.sourceArtifact.url.nullOrBlankToSpdxNone(),
                     licenseConcluded = SpdxConstants.NOASSERTION,
                     licenseDeclared = SpdxConstants.NOASSERTION,
-                    packageVerificationCode = sourceArtifactScanResult?.toSpdxPackageVerificationCode()
+                    packageVerificationCode = packageVerificationCode
                 )
 
                 val sourceArtifactPackageRelationship = SpdxRelationship(
                     spdxElementId = binaryPackage.spdxId,
-                    relatedSpdxElement = sourceArtifactPackage.spdxId,
-                    relationshipType = SpdxRelationship.Type.GENERATED_FROM
+                    relationshipType = SpdxRelationship.Type.GENERATED_FROM,
+                    relatedSpdxElement = sourceArtifactPackage.spdxId
                 )
 
                 packages += sourceArtifactPackage
@@ -201,17 +215,29 @@ private fun getSpdxCopyrightText(
     }
 }
 
-private fun Identifier.toSpdxPackageName(): String = "$type:$namespace:$name"
-
 private fun Package.toSpdxExternalReferences(): List<SpdxExternalReference> {
-    if (purl.isEmpty()) return emptyList()
+    val externalRefs = mutableListOf<SpdxExternalReference>()
 
-    val reference = SpdxExternalReference(
-        referenceType = SpdxExternalReference.Type.Purl,
-        referenceLocator = purl
-    )
+    if (purl.isNotEmpty()) {
+        externalRefs += SpdxExternalReference(
+            referenceType = SpdxExternalReference.Type.Purl,
+            referenceLocator = purl
+        )
+    }
 
-    return listOf(reference)
+    cpe?.takeUnless { it.isEmpty() }?.let {
+        val referenceType = if (it.startsWith("cpe:2.3")) {
+            SpdxExternalReference.Type.Cpe23Type
+        } else {
+            SpdxExternalReference.Type.Cpe22Type
+        }
+        externalRefs += SpdxExternalReference(
+            referenceType,
+            referenceLocator = it
+        )
+    }
+
+    return externalRefs
 }
 
 private fun ProcessedDeclaredLicense.toSpdxDeclaredLicense(): String =

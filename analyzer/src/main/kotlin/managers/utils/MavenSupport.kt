@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2017-2019 HERE Europe B.V.
+ * Copyright (C) 2021 Bosch.IO GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -469,6 +470,9 @@ class MavenSupport(private val workspaceReader: WorkspaceReader) {
         val remoteRepositories = allRepositories.filterNot {
             // Some (Linux) file URIs do not start with "file://" but look like "file:/opt/android-sdk-linux".
             it.url.startsWith("file:/")
+        }.map { repository ->
+            val proxy = repositorySystemSession.proxySelector.getProxy(repository)
+            RemoteRepository.Builder(repository).setProxy(proxy).build()
         }
 
         if (log.delegate.isDebugEnabled) {
@@ -541,16 +545,15 @@ class MavenSupport(private val workspaceReader: WorkspaceReader) {
 
                 val transporter = transporterProvider.newTransporter(repositorySystemSession, repository)
 
-                @Suppress("TooGenericExceptionCaught")
-                val actualChecksum = try {
+                val actualChecksum = runCatching {
                     val task = GetTask(checksum.location)
                     transporter.get(task)
 
                     trimChecksumData(task.dataString)
-                } catch (e: Exception) {
-                    e.showStackTrace()
+                }.getOrElse {
+                    it.showStackTrace()
 
-                    log.warn { "Could not get checksum for '$artifact': ${e.collectMessagesAsString()}" }
+                    log.warn { "Could not get checksum for '$artifact': ${it.collectMessagesAsString()}" }
 
                     // Fall back to an empty checksum string.
                     ""
@@ -675,6 +678,12 @@ class MavenSupport(private val workspaceReader: WorkspaceReader) {
             PackageManager.processProjectVcs(it, vcsFromPackage, *vcsFallbackUrls)
         } ?: PackageManager.processPackageVcs(vcsFromPackage, *vcsFallbackUrls)
 
+        val isSpringStarterProject = with(mavenProject) {
+            listOf("boot", "cloud").any {
+                groupId == "org.springframework.$it" && artifactId.startsWith("spring-$it-starter-")
+            }
+        }
+
         return Package(
             id = Identifier(
                 type = "Maven",
@@ -691,7 +700,7 @@ class MavenSupport(private val workspaceReader: WorkspaceReader) {
             sourceArtifact = sourceRemoteArtifact,
             vcs = vcsFromPackage,
             vcsProcessed = vcsProcessed,
-            isMetaDataOnly = mavenProject.packaging == "pom",
+            isMetaDataOnly = mavenProject.packaging == "pom" || isSpringStarterProject,
             isModified = isBinaryArtifactModified || isSourceArtifactModified
         )
     }

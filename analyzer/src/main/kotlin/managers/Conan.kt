@@ -50,12 +50,11 @@ import org.ossreviewtoolkit.model.jsonMapper
 import org.ossreviewtoolkit.model.yamlMapper
 import org.ossreviewtoolkit.utils.common.CommandLineTool
 import org.ossreviewtoolkit.utils.common.Os
-import org.ossreviewtoolkit.utils.common.ProcessCapture
 import org.ossreviewtoolkit.utils.common.safeDeleteRecursively
 import org.ossreviewtoolkit.utils.common.stashDirectories
 import org.ossreviewtoolkit.utils.common.textValueOrEmpty
 import org.ossreviewtoolkit.utils.common.toUri
-import org.ossreviewtoolkit.utils.core.createOrtTempFile
+import org.ossreviewtoolkit.utils.core.createOrtTempDir
 import org.ossreviewtoolkit.utils.core.log
 
 /**
@@ -71,6 +70,12 @@ class Conan(
     repoConfig: RepositoryConfiguration
 ) : PackageManager(name, analysisRoot, analyzerConfig, repoConfig), CommandLineTool {
     companion object {
+        private val DUMMY_COMPILER_SETTINGS = arrayOf(
+            "-s", "compiler=gcc",
+            "-s", "compiler.libcxx=libstdc++",
+            "-s", "compiler.version=11.1"
+        )
+
         private const val SCOPE_NAME_DEPENDENCIES = "requires"
         private const val SCOPE_NAME_DEV_DEPENDENCIES = "build_requires"
     }
@@ -84,6 +89,17 @@ class Conan(
             repoConfig: RepositoryConfiguration
         ) = Conan(managerName, analysisRoot, analyzerConfig, repoConfig)
     }
+
+    private val conanHome = Os.userHomeDirectory.resolve(".conan")
+
+    // This is where Conan caches downloaded packages [1]. Note that the package cache is not concurrent, and its
+    // layout does not support packages from different remotes that are named (and versioned) the same.
+    //
+    // TODO: Consider using the experimental (and by default disabled) download cache [2] to lift these limitations.
+    //
+    // [1]: https://docs.conan.io/en/latest/reference/config_files/conan.conf.html#storage
+    // [2]: https://docs.conan.io/en/latest/configuration/download_cache.html#download-cache
+    private val conanStoragePath = conanHome.resolve("data")
 
     private val pkgInspectResults = mutableMapOf<String, JsonNode>()
 
@@ -99,7 +115,7 @@ class Conan(
 
     override fun getVersionRequirement(): Requirement = Requirement.buildIvy("[1.18.0,)")
 
-    override fun beforeResolution(definitionFiles: List<File>) = checkVersion(analyzerConfig.ignoreToolVersions)
+    override fun beforeResolution(definitionFiles: List<File>) = checkVersion()
 
     /**
      * Primary method for resolving dependencies from [definitionFile].
@@ -114,71 +130,20 @@ class Conan(
         }
 
     private fun resolvedDependenciesInternal(definitionFile: File): List<ProjectAnalyzerResult> {
-        val conanHome = Os.userHomeDirectory.resolve(".conan")
-
-        // This is where Conan caches downloaded packages [1]. Note that the package cache is not concurrent, and its
-        // layout does not support packages from different remotes that are named (and versioned) the same.
-        //
-        // TODO: Consider using the experimental (and by default disabled) download cache [2] to lift these limitations.
-        //
-        // [1]: https://docs.conan.io/en/latest/reference/config_files/conan.conf.html#storage
-        // [2]: https://docs.conan.io/en/latest/configuration/download_cache.html#download-cache
-        val conanStoragePath = conanHome.resolve("data")
-
         val workingDir = definitionFile.parentFile
-        val conanConfig = listOf(workingDir, analysisRoot).map { it.resolve("conan_config") }
+        val conanConfig = sequenceOf(workingDir, analysisRoot).map { it.resolve("conan_config") }
             .find { it.isDirectory }
         val directoryToStash = conanConfig?.let { conanHome } ?: conanStoragePath
 
         stashDirectories(directoryToStash).use {
-            conanConfig?.also {
-                run("config", "install", it.absolutePath)
+            conanConfig?.also { configureRemoteAuthentication(it) }
 
-                val remoteList = run("remote", "list", "--raw")
-                if (remoteList.isSuccess) {
-                    remoteList.stdout.lines().forEach { line ->
-                        val trimmedLine = line.trim()
-                        if (trimmedLine.isEmpty() || trimmedLine.startsWith('#')) return@forEach
+            val jsonFile = createOrtTempDir().resolve("info.json")
+            run(workingDir, "info", ".", "--json", jsonFile.absolutePath, *DUMMY_COMPILER_SETTINGS).requireSuccess()
 
-                        val wordIterator = trimmedLine.splitToSequence(' ').iterator()
+            val pkgInfos = jsonMapper.readTree(jsonFile)
+            jsonFile.parentFile.safeDeleteRecursively(force = true)
 
-                        if (!wordIterator.hasNext()) return@forEach
-                        val remoteName = wordIterator.next()
-
-                        if (!wordIterator.hasNext()) return@forEach
-                        val remoteUrl = wordIterator.next()
-
-                        remoteUrl.toUri().onSuccess { uri ->
-                            log.info { "Found remote '$remoteName' pointing to URL $remoteUrl." }
-
-                            val auth = Authenticator.requestPasswordAuthentication(
-                                /* host = */ uri.host,
-                                /* addr = */ null,
-                                /* port = */ uri.port,
-                                /* protocol = */ uri.scheme,
-                                /* prompt = */ null,
-                                /* scheme = */ null
-                            )
-
-                            if (auth != null) {
-                                val userAuth = run("user", "-r", remoteName, "-p", String(auth.password), auth.userName)
-                                if (userAuth.isError) {
-                                    log.error { "Failed to configure user authentication for remote '$remoteName'." }
-                                }
-                            }
-                        }.onFailure {
-                            log.warn { "The remote '$remoteName' points to invalid URL $remoteUrl." }
-                        }
-                    }
-                } else {
-                    log.warn { "Failed to list remotes." }
-                }
-            }
-
-            installDependencies(workingDir)
-
-            val dependenciesJson = run(workingDir, "info", ".", "-j").stdout
-            val pkgInfos = jsonMapper.readTree(dependenciesJson)
             val packageList = removeProjectPackage(pkgInfos, definitionFile.name)
             val packages = parsePackages(packageList, workingDir, conanStoragePath)
 
@@ -212,6 +177,57 @@ class Conan(
                     packages = packages.values.toSortedSet()
                 )
             )
+        }
+    }
+
+    private fun configureRemoteAuthentication(conanConfig: File) {
+        // Install configuration from a local directory.
+        run("config", "install", conanConfig.absolutePath)
+
+        // List configured remotes in "remotes.txt" format.
+        val remoteList = run("remote", "list", "--raw")
+        if (remoteList.isError) {
+            log.warn { "Failed to list remotes." }
+            return
+        }
+
+        // Iterate over configured remotes.
+        remoteList.stdout.lines().forEach { line ->
+            // Extract the remote URL.
+            val trimmedLine = line.trim()
+            if (trimmedLine.isEmpty() || trimmedLine.startsWith('#')) return@forEach
+
+            val wordIterator = trimmedLine.splitToSequence(' ').iterator()
+
+            if (!wordIterator.hasNext()) return@forEach
+            val remoteName = wordIterator.next()
+
+            if (!wordIterator.hasNext()) return@forEach
+            val remoteUrl = wordIterator.next()
+
+            remoteUrl.toUri().onSuccess { uri ->
+                log.info { "Found remote '$remoteName' pointing to URL $remoteUrl." }
+
+                // Request authentication for the extracted remote URL.
+                val auth = Authenticator.requestPasswordAuthentication(
+                    /* host = */ uri.host,
+                    /* addr = */ null,
+                    /* port = */ uri.port,
+                    /* protocol = */ uri.scheme,
+                    /* prompt = */ null,
+                    /* scheme = */ null
+                )
+
+                if (auth != null) {
+                    // Configure Conan's authentication based on ORT's authentication for the remote.
+                    val userAuth = run("user", "-r", remoteName, "-p", String(auth.password), auth.userName)
+                    if (userAuth.isError) {
+                        log.error { "Failed to configure user authentication for remote '$remoteName'." }
+                    }
+                }
+            }.onFailure {
+                log.warn { "The remote '$remoteName' points to invalid URL $remoteUrl." }
+            }
         }
     }
 
@@ -286,7 +302,7 @@ class Conan(
      */
     private fun inspectField(pkgName: String, workingDir: File, field: String): String =
         pkgInspectResults.getOrPut(pkgName) {
-            val jsonFile = createOrtTempFile(managerName)
+            val jsonFile = createOrtTempDir().resolve("inspect.json")
             run(workingDir, "inspect", pkgName, "--json", jsonFile.absolutePath).requireSuccess()
             jsonMapper.readTree(jsonFile).also { jsonFile.parentFile.safeDeleteRecursively(force = true) }
         }.get(field).textValueOrEmpty()
@@ -420,16 +436,6 @@ class Conan(
             sourceArtifact = RemoteArtifact.EMPTY, // TODO: implement me!
             vcs = parseVcsInfo(node)
         )
-
-    /**
-     * Run `conan install .` to install packages in [workingDir]. The `conan install .` command looks for the package
-     * in the remote repository that is built for the same architecture as the host that runs this command. That package
-     * may not exist in the remote and in that case the command will fail. As this is acceptable since package
-     * metadata is fetched anyway, ignore the exit code by not using [run] but [ProcessCapture] directly.
-     */
-    private fun installDependencies(workingDir: File) {
-        ProcessCapture(workingDir, "conan", "install", ".")
-    }
 
     /**
      * Parse information about the package author from the given JSON [node]. If present, return a set containing the

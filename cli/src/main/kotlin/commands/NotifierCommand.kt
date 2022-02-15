@@ -34,6 +34,7 @@ import org.ossreviewtoolkit.cli.utils.readOrtResult
 import org.ossreviewtoolkit.model.utils.mergeLabels
 import org.ossreviewtoolkit.notifier.Notifier
 import org.ossreviewtoolkit.utils.common.expandTilde
+import org.ossreviewtoolkit.utils.core.ORT_NOTIFIER_SCRIPT_FILENAME
 import org.ossreviewtoolkit.utils.core.ortConfigDirectory
 
 class NotifierCommand : CliktCommand(name = "notify", help = "Create notifications based on an ORT result.") {
@@ -48,7 +49,7 @@ class NotifierCommand : CliktCommand(name = "notify", help = "Create notificatio
 
     private val notificationsFile by option(
         "--notifications-file", "-n",
-        help = "The name of a kotlin script file containing notification rules."
+        help = "The name of a Kotlin script file containing notification rules."
     ).convert { it.expandTilde() }
         .file(mustExist = true, canBeFile = true, canBeDir = false, mustBeWritable = false, mustBeReadable = true)
         .convert { it.absoluteFile.normalize() }
@@ -75,7 +76,7 @@ class NotifierCommand : CliktCommand(name = "notify", help = "Create notificatio
     }
 
     private fun readDefaultNotificationsFile(): String {
-        val notificationsFile = ortConfigDirectory.resolve("notifications.kts")
+        val notificationsFile = ortConfigDirectory.resolve(ORT_NOTIFIER_SCRIPT_FILENAME)
 
         if (!notificationsFile.isFile) {
             throw UsageError(

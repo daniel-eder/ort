@@ -24,6 +24,7 @@
 "Apache 2": Apache-2.0
 "Apache 2.0 License": Apache-2.0
 "Apache 2.0": Apache-2.0
+"Apache Licence 2.0": Apache-2.0
 "Apache License (2.0)": Apache-2.0
 "Apache License (v2.0)": Apache-2.0
 "Apache License 2": Apache-2.0
@@ -163,7 +164,7 @@
 "Creative Commons Public Domain": CC-PDDC
 "Creative Commons Zero": CC0-1.0
 "Creative Commons": CC-BY-3.0
-"DBAD": LicenseRef-ort-dbad
+"DBAD": LicenseRef-scancode-dbad
 "DFSG approved": LicenseRef-scancode-free-unknown
 "Dual License: CDDL 1.0 and GPL V2 with Classpath Exception": CDDL-1.0 AND GPL-2.0-only
 "Dual license consisting of the CDDL v1.1 and GPL v2": CDDL-1.1 AND GPL-2.0-only
@@ -193,6 +194,7 @@
 "Eiffel Forum License (EFL)": EFL-2.0
 "Eiffel Forum License (EFL-2.0)": EFL-2.0
 "Eiffel Forum License": EFL-2.0
+"European Union Public Licence (EUPL v.1.1)": EUPL-1.1
 "European Union Public Licence 1.0": EUPL-1.0
 "European Union Public Licence 1.1": EUPL-1.1
 "European Union Public Licence 1.2": EUPL-1.2
@@ -262,6 +264,7 @@
 "GNU Lesser General Public License": LGPL-2.1-or-later
 "GNU Lesser General Public License, Version 2.1": LGPL-2.1-only
 "GNU Lesser General Public License, Version 2.1, February 1999": LGPL-2.1-only
+"GNU Lesser General Public License, Version 3": LGPL-3.0-only
 "GNU Lesser Public License": LGPL-2.1-or-later
 "GNU Library or Lesser General Public License (LGPL)": LGPL-2.1-or-later
 "GNU Library or Lesser General Public License version 2.0 (LGPLv2)": LGPL-2.0-only
@@ -300,6 +303,7 @@
 "LGPL 3.0": LGPL-3.0-only
 "LGPL v3": LGPL-3.0-only
 "LGPL v3+": LGPL-3.0-or-later
+"LGPL v3.0": LGPL-3.0-only
 "LGPL with exceptions or ZPL": LGPL-3.0-or-later OR ZPL-2.1
 "LGPL+BSD": LGPL-2.1-or-later AND BSD-2-Clause
 "LGPL, v2.1 or later": LGPL-2.1-or-later
@@ -375,7 +379,7 @@
 "Ruby's": Ruby
 "SIL OPEN FONT LICENSE Version 1.1": OFL-1.1
 "SIL Open Font License 1.1 (OFL-1.1)": OFL-1.1
-"SOLACE CORPORATION LICENSE AGREEMENT": LicenseRef-ort-Solace-Software-EULA
+"SOLACE CORPORATION LICENSE AGREEMENT": LicenseRef-scancode-solace-software-eula-2020
 "Scala License": Apache-2.0 AND BSD-3-Clause AND MIT
 "Sequence Library License (BSD-like)": BSD-3-Clause
 "Similar to Apache License but with the acknowledgment clause removed": LicenseRef-scancode-jdom

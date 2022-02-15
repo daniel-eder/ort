@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2017-2019 HERE Europe B.V.
- * Copyright (C) 2020-2021 Bosch.IO GmbH
+ * Copyright (C) 2020-2022 Bosch.IO GmbH
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,6 +40,7 @@ import org.ossreviewtoolkit.analyzer.PackageManager
 import org.ossreviewtoolkit.analyzer.curation.ClearlyDefinedPackageCurationProvider
 import org.ossreviewtoolkit.analyzer.curation.FallbackPackageCurationProvider
 import org.ossreviewtoolkit.analyzer.curation.FilePackageCurationProvider
+import org.ossreviewtoolkit.analyzer.curation.OrtConfigPackageCurationProvider
 import org.ossreviewtoolkit.analyzer.curation.SimplePackageCurationProvider
 import org.ossreviewtoolkit.analyzer.curation.Sw360PackageCurationProvider
 import org.ossreviewtoolkit.cli.GlobalOptions
@@ -131,6 +132,11 @@ class AnalyzerCommand : CliktCommand(name = "analyze", help = "Determine depende
         help = "Whether to fall back to package curation data from the ClearlyDefine service or not."
     ).flag()
 
+    private val useOrtCurations by option(
+        "--ort-curations",
+        help = "Whether to fall back to package curation data from the ort-config repository or not."
+    ).flag()
+
     private val useSw360Curations by option(
         "--sw360-curations",
         help = "Whether to fall back to package curation data from the SW360 service or not."
@@ -142,13 +148,23 @@ class AnalyzerCommand : CliktCommand(name = "analyze", help = "Determine depende
                 "times. For example: --label distribution=external"
     ).associate()
 
-    private val packageManagers by option(
+    private val activatedPackageManagers by option(
         "--package-managers", "-m",
-        help = "The comma-separated package managers to activate, any of ${allPackageManagersByName.keys}."
+        help = "The comma-separated package managers to activate, any of ${allPackageManagersByName.keys}. Note that " +
+                "deactivation overrides activation."
     ).convert { name ->
         allPackageManagersByName[name]
             ?: throw BadParameterValue("Package managers must be one or more of ${allPackageManagersByName.keys}.")
-    }.split(",").default(PackageManager.ALL)
+    }.split(",").default(PackageManager.ALL.toList())
+
+    private val deactivatedPackageManagers by option(
+        "--not-package-managers", "-n",
+        help = "The comma-separated package managers to deactivate, any of ${allPackageManagersByName.keys}. Note " +
+                "that deactivation overrides activation."
+    ).convert { name ->
+        allPackageManagersByName[name]
+            ?: throw BadParameterValue("Package managers must be one or more of ${allPackageManagersByName.keys}.")
+    }.split(",").default(emptyList())
 
     private val globalOptionsForSubcommands by requireObject<GlobalOptions>()
 
@@ -164,17 +180,26 @@ class AnalyzerCommand : CliktCommand(name = "analyze", help = "Determine depende
             }
         }
 
-        val actualRepositoryConfigurationFile = (repositoryConfigurationFile
-            ?: inputDir.resolve(ORT_REPO_CONFIG_FILENAME)).takeIf { it.isFile }
+        // Manually set a default value based on another option to avoid a "Cannot read from option delegate before
+        // parsing command line" error.
+        val actualRepositoryConfigurationFile = repositoryConfigurationFile
+            ?: inputDir.resolve(ORT_REPO_CONFIG_FILENAME)
 
-        val configurationFiles = listOfNotNull(
-            packageCurationsFile, packageCurationsDir, actualRepositoryConfigurationFile
-        ).map { it.absolutePath }
+        val configurationFiles = listOf(
+            packageCurationsFile,
+            packageCurationsDir,
+            actualRepositoryConfigurationFile,
+            resolutionsFile
+        )
 
-        println("The following configuration files and directories are used:")
-        println("\t" + configurationFiles.joinToString("\n\t"))
+        val configurationInfo = configurationFiles.joinToString("\n\t") { file ->
+            file.absolutePath + " (does not exist)".takeIf { !file.exists() }.orEmpty()
+        }
 
-        val distinctPackageManagers = packageManagers.distinct()
+        println("Looking for analyzer-specific configuration in the following files and directories:")
+        println("\t" + configurationInfo)
+
+        val distinctPackageManagers = activatedPackageManagers.toSet() - deactivatedPackageManagers.toSet()
         println("The following package managers are activated:")
         println("\t" + distinctPackageManagers.joinToString())
 
@@ -183,7 +208,8 @@ class AnalyzerCommand : CliktCommand(name = "analyze", help = "Determine depende
         val config = globalOptionsForSubcommands.config
         val analyzer = Analyzer(config.analyzer, labels)
 
-        val repositoryConfiguration = actualRepositoryConfigurationFile?.readValueOrNull() ?: RepositoryConfiguration()
+        val repositoryConfiguration = actualRepositoryConfigurationFile.takeIf { it.isFile }?.readValueOrNull()
+            ?: RepositoryConfiguration()
 
         val packageCurations =
             FilePackageCurationProvider.from(packageCurationsFile, packageCurationsDir).packageCurations.toMutableList()
@@ -202,6 +228,7 @@ class AnalyzerCommand : CliktCommand(name = "analyze", help = "Determine depende
                 config.analyzer.sw360Configuration?.let {
                     Sw360PackageCurationProvider(it).takeIf { useSw360Curations }
                 },
+                OrtConfigPackageCurationProvider().takeIf { useOrtCurations },
                 ClearlyDefinedPackageCurationProvider().takeIf { useClearlyDefinedCurations }
             )
         )
@@ -211,16 +238,19 @@ class AnalyzerCommand : CliktCommand(name = "analyze", help = "Determine depende
             println("No project found.")
         } else {
             val filesPerManager = info.managedFiles.mapKeysTo(sortedMapOf()) { it.key.managerName }
+            var count = 0
 
             filesPerManager.forEach { (manager, files) ->
+                count += files.size
                 println("Found ${files.size} $manager project(s) at:")
+
                 files.forEach { file ->
                     val relativePath = file.toRelativeString(inputDir).takeIf { it.isNotEmpty() } ?: "."
                     println("\t$relativePath")
                 }
             }
 
-            println("Found ${filesPerManager.size} project(s) in total.")
+            println("Found $count project(s) from ${filesPerManager.size} package manager(s) in total.")
         }
 
         val ortResult = analyzer.analyze(info, curationProvider).mergeLabels(labels)

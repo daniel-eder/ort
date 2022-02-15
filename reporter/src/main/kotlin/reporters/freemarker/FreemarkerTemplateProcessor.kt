@@ -20,6 +20,7 @@
 package org.ossreviewtoolkit.reporter.reporters.freemarker
 
 import freemarker.cache.ClassTemplateLoader
+import freemarker.ext.beans.BeansWrapperBuilder
 import freemarker.template.Configuration
 import freemarker.template.DefaultObjectWrapper
 import freemarker.template.TemplateExceptionHandler
@@ -27,9 +28,14 @@ import freemarker.template.TemplateExceptionHandler
 import java.io.File
 import java.util.SortedMap
 
+import org.ossreviewtoolkit.model.AdvisorCapability
+import org.ossreviewtoolkit.model.AdvisorRecord
+import org.ossreviewtoolkit.model.AdvisorResult
+import org.ossreviewtoolkit.model.AdvisorResultFilter
 import org.ossreviewtoolkit.model.Identifier
 import org.ossreviewtoolkit.model.OrtIssue
 import org.ossreviewtoolkit.model.OrtResult
+import org.ossreviewtoolkit.model.Package
 import org.ossreviewtoolkit.model.RepositoryProvenance
 import org.ossreviewtoolkit.model.RuleViolation
 import org.ossreviewtoolkit.model.ScanResult
@@ -122,7 +128,7 @@ class FreemarkerTemplateProcessor(
             "helper" to TemplateHelper(input),
             "projectsAsPackages" to projectsAsPackages,
             "vulnerabilityReference" to VulnerabilityReference
-        )
+        ) + enumModel()
 
         val freemarkerConfig = Configuration(Configuration.VERSION_2_3_30).apply {
             defaultEncoding = "UTF-8"
@@ -177,6 +183,18 @@ class FreemarkerTemplateProcessor(
         }
 
         return outputFiles
+    }
+
+    /**
+     * Return a map with wrapper beans for the enum classes that are relevant for templates.These enums can then be
+     * referenced directly by templates.
+     * See https://freemarker.apache.org/docs/pgui_misc_beanwrapper.html#jdk_15_enums.
+     */
+    private fun enumModel(): Map<String, Any> {
+        val beansWrapper = BeansWrapperBuilder(Configuration.VERSION_2_3_30).build()
+        val enumModels = beansWrapper.enumModels
+
+        return ENUM_CLASSES.associate { it.simpleName to enumModels.get(it.name) }
     }
 
     /**
@@ -334,9 +352,67 @@ class FreemarkerTemplateProcessor(
          */
         @Suppress("UNUSED") // This function is used in the templates.
         fun filterForUnresolvedVulnerabilities(vulnerabilities: List<Vulnerability>): List<Vulnerability> =
-                vulnerabilities.filterNot { input.resolutionProvider.isResolved(it) }
+            vulnerabilities.filterNot { input.resolutionProvider.isResolved(it) }
+
+        /**
+         * Return a flag indicating that issues have been encountered during the run of an advisor with the given
+         * [capability] with at least the given [severity]. This typically means that the report is incomplete;
+         * therefore, it should contain a corresponding warning.
+         */
+        fun hasAdvisorIssues(capability: AdvisorCapability, severity: Severity): Boolean =
+            input.ortResult.advisor?.results?.filterResults(
+                AdvisorRecord.resultsWithIssues(
+                    capability = capability,
+                    minSeverity = severity
+                )
+            )?.isNotEmpty() ?: false
+
+        /**
+         * Return the subset of the available advisor results produced by an advisor with the given [capability] that
+         * have an issue with at least the given [severity]. With this function packages can be identified whose
+         * results may be incomplete.
+         */
+        fun advisorResultsWithIssues(
+            capability: AdvisorCapability,
+            severity: Severity
+        ): Map<Identifier, List<AdvisorResult>> =
+            input.filteredAdvisorResults(
+                AdvisorRecord.resultsWithIssues(
+                    capability = capability,
+                    minSeverity = severity
+                )
+            )
+
+        /**
+         * Return the subset of the available advisor results that contain vulnerabilities.
+         */
+        fun advisorResultsWithVulnerabilities(): Map<Identifier, List<AdvisorResult>> =
+            input.filteredAdvisorResults(AdvisorRecord.RESULTS_WITH_VULNERABILITIES)
+
+        /**
+         * Return the subset of the available advisor results that contain defects.
+         */
+        fun advisorResultsWithDefects(): Map<Identifier, List<AdvisorResult>> =
+            input.filteredAdvisorResults(AdvisorRecord.RESULTS_WITH_DEFECTS)
+
+        /**
+         * Return the package from the current [OrtResult] with the given [id] or the empty package if the ID cannot be
+         * resolved. This function is useful for templates rendering advisor results, which contain only the
+         * identifiers of affected packages, but not the packages themselves.
+         */
+        fun getPackage(id: Identifier): Package =
+            input.ortResult.getPackage(id)?.pkg
+                ?: Package.EMPTY.also { log.warn { "Could not resolve package '${id.toCoordinates()}'." } }
     }
 }
+
+/**
+ * A list of the enum classes that are made available to templates.
+ */
+private val ENUM_CLASSES = listOf(
+    AdvisorCapability::class.java,
+    Severity::class.java
+)
 
 private fun List<ResolvedLicense>.merge(): ResolvedLicense {
     require(isNotEmpty()) { "Cannot merge an empty list." }
@@ -454,3 +530,10 @@ private fun ReporterInput.replaceOrtResult(ortResult: OrtResult): ReporterInput 
             licenseFilenamePatterns = licenseInfoResolver.licenseFilenamePatterns
         )
     )
+
+/**
+ * Apply the given [filter] to the advisor results stored in this [ReporterInput]. Return an empty map if no advisor
+ * results are available.
+ */
+private fun ReporterInput.filteredAdvisorResults(filter: AdvisorResultFilter): Map<Identifier, List<AdvisorResult>> =
+    ortResult.advisor?.results?.filterResults(filter).orEmpty()

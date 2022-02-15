@@ -31,7 +31,7 @@ import org.ossreviewtoolkit.model.config.RepositoryConfiguration
 import org.ossreviewtoolkit.utils.common.Os
 
 /**
- * The [Yarn](https://www.yarnpkg.com/) package manager for JavaScript.
+ * The [Yarn](https://classic.yarnpkg.com/) package manager for JavaScript.
  */
 class Yarn(
     name: String,
@@ -62,5 +62,5 @@ class Yarn(
     override fun beforeResolution(definitionFiles: List<File>) =
         // We do not actually depend on any features specific to a Yarn version, but we still want to stick to a
         // fixed minor version to be sure to get consistent results.
-        checkVersion(analyzerConfig.ignoreToolVersions)
+        checkVersion()
 }

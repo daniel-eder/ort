@@ -28,8 +28,6 @@ import java.io.File
 import java.lang.IllegalArgumentException
 import java.util.SortedSet
 
-import kotlin.io.path.createTempDirectory
-
 import org.ossreviewtoolkit.analyzer.AbstractPackageManagerFactory
 import org.ossreviewtoolkit.analyzer.PackageManager
 import org.ossreviewtoolkit.downloader.VersionControlSystem
@@ -52,8 +50,9 @@ import org.ossreviewtoolkit.utils.common.ProcessCapture
 import org.ossreviewtoolkit.utils.common.normalizeLineBreaks
 import org.ossreviewtoolkit.utils.common.safeDeleteRecursively
 import org.ossreviewtoolkit.utils.common.textValueOrEmpty
-import org.ossreviewtoolkit.utils.core.ORT_NAME
 import org.ossreviewtoolkit.utils.core.OkHttpClientHelper
+import org.ossreviewtoolkit.utils.core.createOrtTempDir
+import org.ossreviewtoolkit.utils.core.createOrtTempFile
 import org.ossreviewtoolkit.utils.core.log
 
 // The lowest version that supports "--prefer-binary" and PEP 508 URL requirements to be used as dependencies.
@@ -102,7 +101,7 @@ object PythonVersion : CommandLineTool {
      * returned.
      */
     fun getPythonVersion(workingDir: File): Int {
-        val scriptFile = File.createTempFile("python_compatibility", ".py")
+        val scriptFile = createOrtTempFile("python_compatibility", ".py")
         scriptFile.writeBytes(javaClass.getResource("/scripts/python_compatibility.py").readBytes())
 
         try {
@@ -208,8 +207,7 @@ class Pip(
         return process
     }
 
-    override fun beforeResolution(definitionFiles: List<File>) =
-        VirtualEnv.checkVersion(analyzerConfig.ignoreToolVersions)
+    override fun beforeResolution(definitionFiles: List<File>) = VirtualEnv.checkVersion()
 
     @Suppress("LongMethod")
     override fun resolveDependencies(definitionFile: File, labels: Map<String, String>): List<ProjectAnalyzerResult> {
@@ -278,7 +276,7 @@ class Pip(
 
         // Try to get additional information from any "requirements.txt" file.
         val (requirementsName, requirementsVersion, requirementsSuffix) = if (definitionFile.name != "setup.py") {
-            val pythonVersionLines = definitionFile.readLines().filter { it.contains("python_version") }
+            val pythonVersionLines = definitionFile.readLines().filter { "python_version" in it }
             if (pythonVersionLines.isNotEmpty()) {
                 log.debug {
                     "Some dependencies have Python version requirements:\n$pythonVersionLines"
@@ -440,10 +438,14 @@ class Pip(
             it.isBlank() || it == "UNKNOWN"
         }
 
-    private fun getLicenseFromClassifier(classifier: String): String? =
+    private fun getLicenseFromClassifier(classifier: String): String? {
         // Example license classifier:
         // "License :: OSI Approved :: GNU Library or Lesser General Public License (LGPL)"
-        classifier.split(" :: ").takeIf { it.first() == "License" }?.last()?.takeUnless { it == "OSI Approved" }
+        val classifiers = classifier.split(" :: ").map { it.trim() }
+        val licenseClassifiers = listOf("License", "OSI Approved")
+        val license = classifiers.takeIf { it.first() in licenseClassifiers }?.last()
+        return license?.takeUnless { it in licenseClassifiers }
+    }
 
     private fun setupVirtualEnv(workingDir: File, definitionFile: File): File {
         // Create an out-of-tree virtualenv.
@@ -485,7 +487,7 @@ class Pip(
     }
 
     private fun createVirtualEnv(workingDir: File, pythonVersion: Int): File {
-        val virtualEnvDir = createTempDirectory("$ORT_NAME-${workingDir.name}-virtualenv").toFile()
+        val virtualEnvDir = createOrtTempDir("${workingDir.name}-virtualenv")
         val pythonInterpreter = requireNotNull(PythonVersion.getPythonInterpreter(pythonVersion)) {
             "No Python interpreter found for version $pythonVersion."
         }

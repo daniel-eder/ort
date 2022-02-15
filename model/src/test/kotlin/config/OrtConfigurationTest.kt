@@ -47,7 +47,6 @@ class OrtConfigurationTest : WordSpec({
             val ortConfig = OrtConfiguration.load(file = refConfig)
 
             with(ortConfig.analyzer) {
-                ignoreToolVersions shouldBe true
                 allowDynamicVersions shouldBe true
 
                 sw360Configuration shouldNotBeNull {
@@ -151,6 +150,26 @@ class OrtConfigurationTest : WordSpec({
                 storageWriters shouldContainExactly listOf("postgres")
 
                 ignorePatterns shouldContainExactly listOf("**/META-INF/DEPENDENCIES")
+
+                provenanceStorage shouldNotBeNull {
+                    fileStorage shouldNotBeNull {
+                        httpFileStorage should beNull()
+                        localFileStorage shouldNotBeNull {
+                            directory shouldBe File("~/.ort/scanner/provenance")
+                        }
+                    }
+
+                    postgresStorage shouldNotBeNull {
+                        url shouldBe "jdbc:postgresql://your-postgresql-server:5444/your-database"
+                        schema shouldBe "public"
+                        username shouldBe "username"
+                        password shouldBe "password"
+                        sslmode shouldBe "required"
+                        sslcert shouldBe "/defaultdir/postgresql.crt"
+                        sslkey shouldBe "/defaultdir/postgresql.pk8"
+                        sslrootcert shouldBe "/defaultdir/root.crt"
+                    }
+                }
             }
 
             with(ortConfig.notifier) {

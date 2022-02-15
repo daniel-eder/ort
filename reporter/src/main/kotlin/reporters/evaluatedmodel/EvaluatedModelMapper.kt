@@ -32,6 +32,7 @@ import org.ossreviewtoolkit.model.ScanResult
 import org.ossreviewtoolkit.model.TextLocation
 import org.ossreviewtoolkit.model.VcsInfo
 import org.ossreviewtoolkit.model.Vulnerability
+import org.ossreviewtoolkit.model.VulnerabilityReference
 import org.ossreviewtoolkit.model.config.IssueResolution
 import org.ossreviewtoolkit.model.config.LicenseFindingCuration
 import org.ossreviewtoolkit.model.config.PathExclude
@@ -127,6 +128,8 @@ internal class EvaluatedModelMapper(private val input: ReporterInput) {
                 input.licenseInfoResolver
             ),
             repository = input.ortResult.repository,
+            severeIssueThreshold = input.ortConfig.severeIssueThreshold,
+            severeRuleViolationThreshold = input.ortConfig.severeRuleViolationThreshold,
             repositoryConfiguration = yamlMapper.writeValueAsString(input.ortResult.repository.config),
             labels = input.ortResult.labels,
             metaData = MetaDataCalculator().getMetaData(input.ortResult)
@@ -204,10 +207,20 @@ internal class EvaluatedModelMapper(private val input: ReporterInput) {
                 results.flatMap { result ->
                     result.vulnerabilities.map { vulnerability ->
                         val resolutions = addResolutions(vulnerability)
+                        val evaluatedReferences: List<EvaluatedVulnerabilityReference> =
+                            vulnerability.references.map {
+                                EvaluatedVulnerabilityReference(
+                                    it.url,
+                                    it.scoringSystem,
+                                    it.severity,
+                                    VulnerabilityReference.getSeverityString(it.scoringSystem, it.severity)
+                                )
+                            }
+
                         vulnerabilities += EvaluatedVulnerability(
                             pkg = pkg,
                             id = vulnerability.id,
-                            references = vulnerability.references,
+                            references = evaluatedReferences,
                             resolutions = resolutions
                         )
                     }

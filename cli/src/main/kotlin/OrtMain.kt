@@ -58,21 +58,6 @@ import org.ossreviewtoolkit.utils.core.ortDataDirectory
 import org.ossreviewtoolkit.utils.core.printStackTrace
 
 /**
- * The choice of data entities to process.
- */
-enum class DataEntity {
-    /**
-     * Identifier for package entities.
-     */
-    PACKAGES,
-
-    /**
-     * Identifier for project entities.
-     */
-    PROJECTS
-}
-
-/**
  * Helper class for mutually exclusive command line options of different types.
  */
 sealed class GroupTypes {
@@ -114,7 +99,7 @@ class OrtMain : CliktCommand(name = ORT_NAME, invokeWithoutSubcommand = true) {
     private val configArguments by option(
         "-P",
         help = "Override a key-value pair in the configuration file. For example: " +
-                "-P ort.scanner.storages.postgresStorage.schema=testSchema"
+                "-P ort.scanner.storages.postgres.schema=testSchema"
     ).associate()
 
     private val forceOverwrite by option(
@@ -187,7 +172,7 @@ class OrtMain : CliktCommand(name = ORT_NAME, invokeWithoutSubcommand = true) {
     override fun run() {
         Configurator.setRootLevel(logLevel)
 
-        log.debug { "Used command line arguments: ${currentContext.originalArgv.joinToString()}" }
+        log.debug { "Used command line arguments: ${currentContext.originalArgv}" }
 
         // Make the parameter globally available.
         printStackTrace = stacktrace
