@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2020 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,17 +18,20 @@
  */
 
 plugins {
-    // Apply core plugins.
-    `java-library`
+    // Apply precompiled plugins.
+    id("ort-library-conventions")
 }
 
 dependencies {
-    api(libs.log4jApiKotlin)
+    api(libs.okhttp)
     api(libs.retrofit)
 
-    implementation(libs.jacksonModuleKotlin)
-    implementation(libs.kotlinxCoroutines)
-    implementation(libs.retrofitConverterJackson)
+    implementation(jacksonLibs.jacksonModuleKotlin)
+    implementation(libs.kotlinx.coroutines)
+    implementation(libs.retrofit.converter.jackson)
 
+    testImplementation(libs.mockk)
     testImplementation(libs.wiremock)
 }
+
+description = "A client to communicate with the API of a FOSSID instance."

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,12 +20,16 @@
 package org.ossreviewtoolkit.scanner.provenance
 
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.core.annotation.Tags
 import io.kotest.core.spec.Spec
 import io.kotest.core.spec.style.WordSpec
+import io.kotest.matchers.should
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.types.beInstanceOf
 
 import java.io.IOException
 
+import org.ossreviewtoolkit.downloader.DefaultWorkingTreeCache
 import org.ossreviewtoolkit.model.ArtifactProvenance
 import org.ossreviewtoolkit.model.Hash
 import org.ossreviewtoolkit.model.Identifier
@@ -35,8 +39,8 @@ import org.ossreviewtoolkit.model.RepositoryProvenance
 import org.ossreviewtoolkit.model.SourceCodeOrigin
 import org.ossreviewtoolkit.model.VcsInfo
 import org.ossreviewtoolkit.model.VcsType
-import org.ossreviewtoolkit.scanner.utils.DefaultWorkingTreeCache
 
+@Tags("RequiresExternalTool")
 class DefaultPackageProvenanceResolverFunTest : WordSpec() {
     private val workingTreeCache = DefaultWorkingTreeCache()
     private val resolver = DefaultPackageProvenanceResolver(DummyProvenanceStorage(), workingTreeCache)
@@ -51,7 +55,7 @@ class DefaultPackageProvenanceResolverFunTest : WordSpec() {
 
     init {
         "Resolving an artifact provenance" should {
-            "Succeed if the artifact exists" {
+            "succeed if the artifact exists" {
                 val pkg = Package.EMPTY.copy(
                     sourceArtifact = RemoteArtifact(
                         url = sourceArtifactUrl,
@@ -60,10 +64,10 @@ class DefaultPackageProvenanceResolverFunTest : WordSpec() {
                 )
 
                 resolver.resolveProvenance(pkg, listOf(SourceCodeOrigin.ARTIFACT)) shouldBe
-                        ArtifactProvenance(pkg.sourceArtifact)
+                    ArtifactProvenance(pkg.sourceArtifact)
             }
 
-            "Fail if the artifact does not exist" {
+            "fail if the artifact does not exist" {
                 val pkg = Package.EMPTY.copy(
                     sourceArtifact = RemoteArtifact(
                         url = "$sourceArtifactUrl.invalid",
@@ -76,7 +80,7 @@ class DefaultPackageProvenanceResolverFunTest : WordSpec() {
         }
 
         "Resolving a repository provenance" should {
-            "Succeed if the revision is correct" {
+            "succeed if the revision is correct" {
                 val pkg = Package.EMPTY.copy(
                     vcsProcessed = VcsInfo(
                         type = VcsType.GIT,
@@ -86,13 +90,13 @@ class DefaultPackageProvenanceResolverFunTest : WordSpec() {
                 )
 
                 resolver.resolveProvenance(pkg, listOf(SourceCodeOrigin.VCS)) shouldBe
-                        RepositoryProvenance(
-                            vcsInfo = pkg.vcsProcessed,
-                            resolvedRevision = "ad0367b7b9920144a47b8d30cc0c84cea102b821"
-                        )
+                    RepositoryProvenance(
+                        vcsInfo = pkg.vcsProcessed,
+                        resolvedRevision = "ad0367b7b9920144a47b8d30cc0c84cea102b821"
+                    )
             }
 
-            "Resolve a tag name to a commit" {
+            "resolve a tag name to a commit" {
                 val pkg = Package.EMPTY.copy(
                     vcsProcessed = VcsInfo(
                         type = VcsType.GIT,
@@ -102,13 +106,13 @@ class DefaultPackageProvenanceResolverFunTest : WordSpec() {
                 )
 
                 resolver.resolveProvenance(pkg, listOf(SourceCodeOrigin.VCS)) shouldBe
-                        RepositoryProvenance(
-                            vcsInfo = pkg.vcsProcessed,
-                            resolvedRevision = "ad0367b7b9920144a47b8d30cc0c84cea102b821"
-                        )
+                    RepositoryProvenance(
+                        vcsInfo = pkg.vcsProcessed,
+                        resolvedRevision = "ad0367b7b9920144a47b8d30cc0c84cea102b821"
+                    )
             }
 
-            "Fail if the revision does not exist" {
+            "fail if the revision does not exist" {
                 val pkg = Package.EMPTY.copy(
                     vcsProcessed = VcsInfo(
                         type = VcsType.GIT,
@@ -120,7 +124,7 @@ class DefaultPackageProvenanceResolverFunTest : WordSpec() {
                 shouldThrow<IOException> { resolver.resolveProvenance(pkg, listOf(SourceCodeOrigin.VCS)) }
             }
 
-            "Guess the correct tag for a package" {
+            "guess the correct tag for a package" {
                 val pkg = Package.EMPTY.copy(
                     id = Identifier("NPM::test:1.0.0"),
                     vcsProcessed = VcsInfo(
@@ -131,15 +135,32 @@ class DefaultPackageProvenanceResolverFunTest : WordSpec() {
                 )
 
                 resolver.resolveProvenance(pkg, listOf(SourceCodeOrigin.VCS)) shouldBe
-                        RepositoryProvenance(
-                            vcsInfo = pkg.vcsProcessed,
-                            resolvedRevision = "ad0367b7b9920144a47b8d30cc0c84cea102b821"
-                        )
+                    RepositoryProvenance(
+                        vcsInfo = pkg.vcsProcessed,
+                        resolvedRevision = "ad0367b7b9920144a47b8d30cc0c84cea102b821"
+                    )
+            }
+
+            "work for Subversion tags" {
+                val pkg = Package.EMPTY.copy(
+                    id = Identifier("Maven:xml-apis:xml-apis:1.3.03"),
+                    vcsProcessed = VcsInfo(
+                        type = VcsType.SUBVERSION,
+                        url = "https://svn.apache.org/repos/asf/xerces/xml-commons",
+                        revision = "tags/xml-commons-external-1_3_03"
+                    )
+                )
+
+                resolver.resolveProvenance(pkg, listOf(SourceCodeOrigin.VCS)) shouldBe
+                    RepositoryProvenance(
+                        vcsInfo = pkg.vcsProcessed,
+                        resolvedRevision = "380970"
+                    )
             }
         }
 
         "Resolving the provenance for multiple origins" should {
-            "Respect the source code origin priority" {
+            "respect the source code origin priority" {
                 val pkg = Package.EMPTY.copy(
                     sourceArtifact = RemoteArtifact(
                         url = sourceArtifactUrl,
@@ -153,16 +174,16 @@ class DefaultPackageProvenanceResolverFunTest : WordSpec() {
                 )
 
                 resolver.resolveProvenance(pkg, listOf(SourceCodeOrigin.ARTIFACT, SourceCodeOrigin.VCS)) shouldBe
-                        ArtifactProvenance(pkg.sourceArtifact)
+                    ArtifactProvenance(pkg.sourceArtifact)
 
                 resolver.resolveProvenance(pkg, listOf(SourceCodeOrigin.VCS, SourceCodeOrigin.ARTIFACT)) shouldBe
-                        RepositoryProvenance(
-                            vcsInfo = pkg.vcsProcessed,
-                            resolvedRevision = "ad0367b7b9920144a47b8d30cc0c84cea102b821"
-                        )
+                    RepositoryProvenance(
+                        vcsInfo = pkg.vcsProcessed,
+                        resolvedRevision = "ad0367b7b9920144a47b8d30cc0c84cea102b821"
+                    )
             }
 
-            "Try all provided source code origins" {
+            "try all provided source code origins" {
                 val pkg = Package.EMPTY.copy(
                     sourceArtifact = RemoteArtifact(
                         url = sourceArtifactUrl,
@@ -171,25 +192,34 @@ class DefaultPackageProvenanceResolverFunTest : WordSpec() {
                 )
 
                 resolver.resolveProvenance(pkg, listOf(SourceCodeOrigin.VCS, SourceCodeOrigin.ARTIFACT)) shouldBe
-                        ArtifactProvenance(pkg.sourceArtifact)
+                    ArtifactProvenance(pkg.sourceArtifact)
+            }
+        }
+
+        "source code origins from package" should {
+            "override the default" {
+                val pkg = Package.EMPTY.copy(
+                    sourceArtifact = RemoteArtifact(
+                        url = sourceArtifactUrl,
+                        hash = Hash.NONE
+                    ),
+                    vcsProcessed = VcsInfo(
+                        type = VcsType.GIT,
+                        url = repositoryUrl,
+                        revision = "ad0367b7b9920144a47b8d30cc0c84cea102b821"
+                    )
+                )
+
+                resolver.resolveProvenance(
+                    pkg.copy(sourceCodeOrigins = listOf(SourceCodeOrigin.VCS)),
+                    listOf(SourceCodeOrigin.ARTIFACT, SourceCodeOrigin.VCS)
+                ) should beInstanceOf<RepositoryProvenance>()
+
+                resolver.resolveProvenance(
+                    pkg.copy(sourceCodeOrigins = listOf(SourceCodeOrigin.ARTIFACT)),
+                    listOf(SourceCodeOrigin.VCS, SourceCodeOrigin.ARTIFACT)
+                ) should beInstanceOf<ArtifactProvenance>()
             }
         }
     }
-}
-
-internal class DummyProvenanceStorage : PackageProvenanceStorage {
-    override fun readProvenance(id: Identifier, sourceArtifact: RemoteArtifact): PackageProvenanceResolutionResult? =
-        null
-
-    override fun readProvenance(id: Identifier, vcs: VcsInfo): PackageProvenanceResolutionResult? = null
-
-    override fun readProvenances(id: Identifier): List<PackageProvenanceResolutionResult> = emptyList()
-
-    override fun putProvenance(id: Identifier, vcs: VcsInfo, result: PackageProvenanceResolutionResult) { /** no-op */ }
-
-    override fun putProvenance(
-        id: Identifier,
-        sourceArtifact: RemoteArtifact,
-        result: PackageProvenanceResolutionResult
-    ) { /** no-op */ }
 }

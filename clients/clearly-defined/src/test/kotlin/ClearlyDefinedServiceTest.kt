@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2022 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,8 +26,6 @@ import io.kotest.matchers.shouldBe
 import java.io.File
 import java.net.URI
 
-import kotlinx.serialization.encodeToString
-
 class ClearlyDefinedServiceTest : WordSpec({
     "Serialization to a string representation" should {
         "work for File" {
@@ -43,13 +41,13 @@ class ClearlyDefinedServiceTest : WordSpec({
         }
 
         "work for ComponentType" {
-            enumValues<ComponentType>().forAll {
+            ComponentType.entries.forAll {
                 ClearlyDefinedService.JSON.encodeToString(it) shouldBe "\"$it\""
             }
         }
 
         "work for Provider" {
-            enumValues<Provider>().forAll {
+            Provider.entries.forAll {
                 ClearlyDefinedService.JSON.encodeToString(it) shouldBe "\"$it\""
             }
         }

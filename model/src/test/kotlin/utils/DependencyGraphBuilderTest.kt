@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,25 +24,23 @@ import io.kotest.core.spec.style.WordSpec
 import io.kotest.matchers.collections.beEmpty
 import io.kotest.matchers.collections.containExactly
 import io.kotest.matchers.collections.containExactlyInAnyOrder
-import io.kotest.matchers.collections.shouldContainExactly
-import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.should
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.shouldContain
 
-import java.util.SortedSet
+import io.mockk.every
+import io.mockk.spyk
 
 import org.ossreviewtoolkit.model.DependencyGraph
 import org.ossreviewtoolkit.model.DependencyGraphEdge
 import org.ossreviewtoolkit.model.Identifier
-import org.ossreviewtoolkit.model.OrtIssue
+import org.ossreviewtoolkit.model.Issue
 import org.ossreviewtoolkit.model.Package
 import org.ossreviewtoolkit.model.PackageLinkage
 import org.ossreviewtoolkit.model.PackageReference
 import org.ossreviewtoolkit.model.RootDependencyIndex
 import org.ossreviewtoolkit.model.Scope
-import org.ossreviewtoolkit.utils.test.shouldNotBeNull
 
 class DependencyGraphBuilderTest : WordSpec({
     "DependencyGraphBuilder" should {
@@ -61,13 +59,8 @@ class DependencyGraphBuilderTest : WordSpec({
                 .build()
 
             graph.scopeRoots should beEmpty()
-            graph.nodes shouldNotBeNull {
-                this shouldHaveSize 3
-            }
-
-            graph.edges shouldNotBeNull {
-                this should beEmpty()
-            }
+            graph.nodes shouldHaveSize 3
+            graph.edges should beEmpty()
 
             val scopes = graph.createScopes()
 
@@ -123,10 +116,10 @@ class DependencyGraphBuilderTest : WordSpec({
                 "org.apache.commons",
                 "commons-configuration2",
                 "2.7",
-                dependencies = listOf(dep1, dep2)
+                dependencies = setOf(dep1, dep2)
             )
-            val dep4 = createDependency("org.apache.commons", "commons-csv", "1.5", dependencies = listOf(dep1))
-            val dep5 = createDependency("com.acme", "dep", "0.7", dependencies = listOf(dep3))
+            val dep4 = createDependency("org.apache.commons", "commons-csv", "1.5", dependencies = setOf(dep1))
+            val dep5 = createDependency("com.acme", "dep", "0.7", dependencies = setOf(dep3))
 
             val graph = createGraphBuilder()
                 .addDependency(scope1, dep1)
@@ -138,10 +131,8 @@ class DependencyGraphBuilderTest : WordSpec({
                 .build()
             val scopes = graph.createScopes()
 
-            graph.nodes shouldNotBeNull {
-                this shouldHaveSize 5
-                all { it.fragment == 0 } shouldBe true
-            }
+            graph.nodes shouldHaveSize 5
+            graph.nodes.all { it.fragment == 0 } shouldBe true
 
             scopeDependencies(scopes, scope1) shouldBe setOf(dep1, dep3, dep5)
             scopeDependencies(scopes, scope2) shouldBe setOf(dep1, dep2, dep4)
@@ -153,21 +144,21 @@ class DependencyGraphBuilderTest : WordSpec({
             val depLog = createDependency("commons-logging", "commons-logging", "1.2")
             val depConfig1 = createDependency(
                 "org.apache.commons", "commons-configuration2", "2.7",
-                dependencies = listOf(depLog, depLang)
+                dependencies = setOf(depLog, depLang)
             )
             val depConfig2 = createDependency(
                 "org.apache.commons", "commons-configuration2", "2.7",
-                dependencies = listOf(depLang)
+                dependencies = setOf(depLang)
             )
             val depAcme = createDependency(
                 "com.acme", "lib-full", "1.0",
-                dependencies = listOf(depConfig1, depLang)
+                dependencies = setOf(depConfig1, depLang)
             )
             val depAcmeExclude = createDependency(
                 "com.acme", "lib-exclude", "1.1",
-                dependencies = listOf(depConfig2)
+                dependencies = setOf(depConfig2)
             )
-            val depLib = createDependency("com.business", "lib", "1", dependencies = listOf(depConfig1, depAcmeExclude))
+            val depLib = createDependency("com.business", "lib", "1", dependencies = setOf(depConfig1, depAcmeExclude))
 
             val graph = createGraphBuilder()
                 .addDependency(scope, depAcme)
@@ -184,15 +175,15 @@ class DependencyGraphBuilderTest : WordSpec({
             val depLog = createDependency("commons-logging", "commons-logging", "1.2")
             val depConfig1 = createDependency(
                 "org.apache.commons", "commons-configuration2", "2.7",
-                dependencies = listOf(depLog, depLang)
+                dependencies = setOf(depLog, depLang)
             )
             val depConfig2 = createDependency(
                 "org.apache.commons", "commons-configuration2", "2.7",
-                dependencies = listOf(depLang)
+                dependencies = setOf(depLang)
             )
             val depAcmeExclude = createDependency(
                 "com.acme", "lib-exclude", "1.1",
-                dependencies = listOf(depConfig2)
+                dependencies = setOf(depConfig2)
             )
 
             val graph = createGraphBuilder()
@@ -206,28 +197,70 @@ class DependencyGraphBuilderTest : WordSpec({
             scopeDependencies(scopes, scope2) shouldBe setOf(depAcmeExclude)
         }
 
-        "deal with cycles in dependencies" {
-            val scope = "CyclicScope"
-            val depCyc1 = createDependency("org.cyclic", "cyclic", "77.7")
-            val depFoo = createDependency("org.foo", "foo", "1.2.0", dependencies = listOf(depCyc1))
-            val depCyc2 = createDependency("org.cyclic", "cyclic", "77.7", dependencies = listOf(depFoo))
+        "break cycles in dependencies" {
+            // A simple map of indexed nodes with their dependencies.
+            @Suppress("NoMultipleSpaces")
+            val dependencies = mapOf(
+                1 to listOf(2, 3),
+                2 to listOf(4, 5),
+                3 to listOf(1), // Cycle: 1 -> 3 -> 1
+                5 to listOf(6),
+                6 to listOf(2) // Cycle: 1 -> 2 -> 5 -> 6 -> 2
+            )
+
+            val handler = object : DependencyHandler<Int> {
+                override fun identifierFor(dependency: Int) = Identifier.EMPTY.copy(name = dependency.toString())
+
+                override fun dependenciesFor(dependency: Int) = dependencies[dependency].orEmpty()
+
+                override fun linkageFor(dependency: Int) = PackageLinkage.DYNAMIC
+
+                override fun createPackage(dependency: Int, issues: MutableCollection<Issue>) = null
+            }
+
+            val graph = DependencyGraphBuilder(handler)
+                .addDependency("root", 1)
+                .build(checkReferences = false)
+
+            graph.nodes shouldHaveSize 6
+            graph.edges should containExactly(
+                DependencyGraphEdge(from = 2, to = 1),
+                DependencyGraphEdge(from = 3, to = 0),
+                DependencyGraphEdge(from = 3, to = 2),
+                DependencyGraphEdge(from = 5, to = 3),
+                DependencyGraphEdge(from = 5, to = 4)
+            )
+        }
+
+        "deal with cyclic dependency graphs" {
+            val scope = "CyclicGraph"
+            val depLang = createDependency("org.apache.commons", "commons-lang3", "3.20.0")
+            val depCyc = spyk(createDependency("org.cyclic", "cyclic", "77.7"))
+            val depIntermediate = createDependency(
+                "org.intermediate",
+                "intermediate",
+                "1.0.0",
+                dependencies = setOf(depLang, depCyc)
+            )
+            val depRoot = createDependency("org.foo", "foo", "1.2.0", dependencies = setOf(depIntermediate))
+
+            // This causes a cycle in the dependency graph:
+            every { depCyc.dependencies } returns setOf(depRoot)
 
             val graph = createGraphBuilder()
-                .addDependency(scope, depCyc2)
+                .addDependency(scope, depRoot)
                 .build()
             val scopes = graph.createScopes()
 
-            scopeDependencies(scopes, scope) shouldContainExactly listOf(depCyc2)
+            scopeDependencies(scopes, scope) should containExactly(depRoot)
 
-            graph.nodes.shouldNotBeNull {
-                this shouldHaveSize 3
-            }
+            graph.nodes shouldHaveSize 4
         }
 
         "check for illegal references when building the graph" {
             val depLang = createDependency("org.apache.commons", "commons-lang3", "3.11")
             val depNoPkg = createDependency(NO_PACKAGE_NAMESPACE, "invalid", "1.2")
-            val depLog = createDependency("commons-logging", "commons-logging", "1.2", dependencies = listOf(depNoPkg))
+            val depLog = createDependency("commons-logging", "commons-logging", "1.2", dependencies = setOf(depNoPkg))
 
             val exception = shouldThrow<IllegalArgumentException> {
                 createGraphBuilder()
@@ -236,16 +269,16 @@ class DependencyGraphBuilderTest : WordSpec({
                     .build()
             }
 
-            exception.message shouldContain depNoPkg.id.toString()
+            exception.message shouldContain depNoPkg.id.toCoordinates()
         }
 
         "take issues into account when checking for illegal references" {
             val depLang = createDependency("org.apache.commons", "commons-lang3", "3.11")
             val depIssuesPkg = createDependency(NO_PACKAGE_NAMESPACE, "errors", "1.2").copy(
-                issues = listOf(OrtIssue(source = "test", message = "test issue"))
+                issues = listOf(Issue(source = "test", message = "test issue"))
             )
             val depLog =
-                createDependency("commons-logging", "commons-logging", "1.2", dependencies = listOf(depIssuesPkg))
+                createDependency("commons-logging", "commons-logging", "1.2", dependencies = setOf(depIssuesPkg))
 
             createGraphBuilder()
                 .addDependency("s", depLang)
@@ -265,7 +298,7 @@ class DependencyGraphBuilderTest : WordSpec({
                 "commons-logging",
                 "commons-logging",
                 "1.2",
-                dependencies = listOf(depProjectDynamicPkg, depProjectStaticPkg)
+                dependencies = setOf(depProjectDynamicPkg, depProjectStaticPkg)
             )
 
             createGraphBuilder()
@@ -277,7 +310,7 @@ class DependencyGraphBuilderTest : WordSpec({
         "allow disabling the check for illegal references" {
             val depLang = createDependency("org.apache.commons", "commons-lang3", "3.11")
             val depNoPkg = createDependency(NO_PACKAGE_NAMESPACE, "invalid", "1.2")
-            val depLog = createDependency("commons-logging", "commons-logging", "1.2", dependencies = listOf(depNoPkg))
+            val depLog = createDependency("commons-logging", "commons-logging", "1.2", dependencies = setOf(depNoPkg))
 
             createGraphBuilder()
                 .addDependency("s", depLang)
@@ -296,7 +329,7 @@ class DependencyGraphBuilderTest : WordSpec({
                 .addDependency(scope1, createDependency("g1", "a1", "1"))
                 .addDependency("anotherScope", createDependency("g2", "a2", "2"))
 
-            builder.scopesFor(projectId) shouldBe sortedSetOf("compile", "test")
+            builder.scopesFor(projectId) should containExactlyInAnyOrder("compile", "test")
         }
 
         "collect information about qualified scopes of projects" {
@@ -310,46 +343,35 @@ class DependencyGraphBuilderTest : WordSpec({
                 .addDependency(scope1, createDependency("g1", "a1", "1"))
                 .addDependency("anotherScope", createDependency("g2", "a2", "2"))
 
-            builder.scopesFor(projectId, unqualify = false) shouldBe sortedSetOf(scope2, scope1)
+            builder.scopesFor(projectId).map { DependencyGraph.qualifyScope(projectId, it) } should
+                containExactlyInAnyOrder(scope2, scope1)
         }
     }
 
-    "breakCycles()" should {
-        "not break undirected cycles" {
-            val edges = listOf(
-                1 to 2,
-                2 to 3,
-                3 to 4,
-                1 to 4
-            ).map { DependencyGraphEdge(it.first, it.second) }
+    "DependencyHandler" should {
+        "handle cyclic dependency graphs when checking for equality" {
+            val depLang = createDependency("org.apache.commons", "commons-lang3", "3.20.0")
+            val depCyc = spyk(createDependency("org.cyclic", "cyclic", "77.7"))
+            val depIntermediate = createDependency(
+                "org.intermediate",
+                "intermediate",
+                "1.0.0",
+                dependencies = setOf(depLang, depCyc)
+            )
+            val depRoot = createDependency("org.foo", "foo", "1.2.0", dependencies = setOf(depIntermediate))
 
-            breakCycles(edges) shouldContainExactlyInAnyOrder edges
-        }
+            // This causes a cycle in the dependency graph:
+            every { depCyc.dependencies } returns setOf(depRoot)
 
-        "break a directed cycle with a single node" {
-            val edges = listOf(DependencyGraphEdge(1, 1))
-
-            breakCycles(edges) should beEmpty()
-        }
-
-        "break directed cycles involving multiple nodes" {
-            val edges = listOf(
-                1 to 2,
-                2 to 3,
-                3 to 4,
-                4 to 1
-            ).map { DependencyGraphEdge(it.first, it.second) }
-
-            val result = breakCycles(edges)
-
-            result.intersect(edges) shouldHaveSize 3
+            PackageRefDependencyHandler.areDependenciesEqual(
+                dependenciesA = listOf(depRoot),
+                dependenciesB = listOf(depRoot)
+            ) shouldBe true
         }
     }
 })
 
-/**
- * A special namespace used by dependencies, for which [PackageRefDependencyHandler] should not create a package.
- */
+/** A special namespace used by dependencies, for which [PackageRefDependencyHandler] should not create a package. */
 private const val NO_PACKAGE_NAMESPACE = "no-package"
 
 /**
@@ -359,16 +381,15 @@ private const val NO_PACKAGE_NAMESPACE = "no-package"
 private object PackageRefDependencyHandler : DependencyHandler<PackageReference> {
     override fun identifierFor(dependency: PackageReference): Identifier = dependency.id
 
-    override fun dependenciesFor(dependency: PackageReference): Collection<PackageReference> =
-        dependency.dependencies
+    override fun dependenciesFor(dependency: PackageReference): List<PackageReference> =
+        dependency.dependencies.toList()
 
     override fun linkageFor(dependency: PackageReference): PackageLinkage = dependency.linkage
 
-    override fun createPackage(dependency: PackageReference, issues: MutableList<OrtIssue>): Package? =
+    override fun createPackage(dependency: PackageReference, issues: MutableCollection<Issue>): Package? =
         Package.EMPTY.copy(id = dependency.id).takeUnless { dependency.id.namespace == NO_PACKAGE_NAMESPACE }
 
-    override fun issuesForDependency(dependency: PackageReference): Collection<OrtIssue> =
-        dependency.issues
+    override fun issuesFor(dependency: PackageReference): List<Issue> = dependency.issues
 }
 
 /**
@@ -378,24 +399,17 @@ private object PackageRefDependencyHandler : DependencyHandler<PackageReference>
 private fun createGraphBuilder(): DependencyGraphBuilder<PackageReference> =
     DependencyGraphBuilder(PackageRefDependencyHandler)
 
-/**
- * Create a test dependency with the properties provided.
- */
+/** Create a test dependency with the properties provided. */
 private fun createDependency(
     group: String,
     artifact: String,
     version: String,
-    dependencies: List<PackageReference> = emptyList()
-): PackageReference {
-    val id = Identifier("test", group, artifact, version)
-    return PackageReference(id, dependencies = dependencies.toSortedSet())
-}
+    dependencies: Set<PackageReference> = emptySet()
+) = PackageReference(
+    id = Identifier("test", group, artifact, version),
+    dependencies = dependencies
+)
 
-/**
- * Return the package references from the given [scopes] associated with the scope with the given [scopeName].
- */
-private fun scopeDependencies(
-    scopes: SortedSet<Scope>,
-    scopeName: String
-): Set<PackageReference> =
+/** Return the package references from the given [scopes] associated with the scope with the given [scopeName]. */
+private fun scopeDependencies(scopes: Set<Scope>, scopeName: String): Set<PackageReference> =
     scopes.find { it.name == scopeName }?.dependencies.orEmpty()

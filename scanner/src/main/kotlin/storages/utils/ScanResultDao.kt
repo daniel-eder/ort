@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,23 +19,26 @@
 
 package org.ossreviewtoolkit.scanner.storages.utils
 
-import org.jetbrains.exposed.dao.IntEntity
-import org.jetbrains.exposed.dao.IntEntityClass
-import org.jetbrains.exposed.dao.id.EntityID
-import org.jetbrains.exposed.dao.id.IntIdTable
-import org.jetbrains.exposed.sql.Column
+import org.jetbrains.exposed.v1.core.Column
+import org.jetbrains.exposed.v1.core.dao.id.EntityID
+import org.jetbrains.exposed.v1.core.dao.id.IntIdTable
+import org.jetbrains.exposed.v1.dao.IntEntity
+import org.jetbrains.exposed.v1.dao.IntEntityClass
 
 import org.ossreviewtoolkit.model.Identifier
 import org.ossreviewtoolkit.model.ScanResult
 
 object ScanResults : IntIdTable("scan_results") {
-    val identifier: Column<String> = text("identifier").index("identifier")
-    val scanResult: Column<ScanResult> = jsonb("scan_result", ScanResult::class)
+    val identifier: Column<Identifier> = text("identifier")
+        .transform({ Identifier(it) }, { it.toCoordinates() })
+        .index("identifier")
+
+    val scanResult = jsonb<ScanResult>("scan_result")
 }
 
 class ScanResultDao(id: EntityID<Int>) : IntEntity(id) {
     companion object : IntEntityClass<ScanResultDao>(ScanResults)
 
-    var identifier: Identifier by ScanResults.identifier.transform({ it.toCoordinates() }, { Identifier(it) })
+    var identifier: Identifier by ScanResults.identifier
     var scanResult: ScanResult by ScanResults.scanResult
 }

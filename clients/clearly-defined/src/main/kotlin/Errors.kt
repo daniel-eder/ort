@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2020 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,9 +21,7 @@ package org.ossreviewtoolkit.clients.clearlydefined
 
 import kotlinx.serialization.Serializable
 
-/**
- * See https://github.com/clearlydefined/service/blob/c47a989/app.js#L201-L205.
- */
+/** See https://github.com/clearlydefined/service/blob/c47a989/app.js#L201-L205. */
 @Serializable
 data class ErrorResponse(
     val error: Error

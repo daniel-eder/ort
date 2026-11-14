@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -35,9 +35,7 @@ class DependencyGraphNavigator(
         }
     }
 
-    /**
-     * A data structure allowing fast access to a specific [DependencyReference] based on its index and fragment.
-     */
+    /** A data structure allowing fast access to a specific [DependencyReference] based on its index and fragment. */
     private val graphDependencyRefMappings: Map<String, Array<MutableList<DependencyGraphNode>>> by lazy {
         graphs.mapValues { it.value.dependencyRefMapping() }
     }
@@ -45,15 +43,37 @@ class DependencyGraphNavigator(
     override fun scopeNames(project: Project): Set<String> = project.scopeNames.orEmpty()
 
     override fun directDependencies(project: Project, scopeName: String): Sequence<DependencyNode> {
-        val graph = graphForManager(project.managerName)
-        val rootDependencies = graph.scopes[DependencyGraph.qualifyScope(project, scopeName)].orEmpty().map { root ->
-            referenceFor(project.managerName, root)
+        // Collect all root indices for all managers whose graphs have projects of the respective type.
+        val rootIndicesForGraphs = graphs.mapNotNull { (managerName, graph) ->
+            graph.scopes[DependencyGraph.qualifyScope(project.id, scopeName)]?.let { Triple(managerName, graph, it) }
+        }
+
+        if (rootIndicesForGraphs.isEmpty()) return emptySequence()
+
+        // TODO: Consider extending the signature of this function to also take a manager name, so that the dependencies
+        //       for that manager could be obtained without "guessing" which of the managers created the project.
+        val (managerName, graph, rootIndices) = requireNotNull(rootIndicesForGraphs.singleOrNull()) {
+            val managerNames = rootIndicesForGraphs.map { (managerName, _, _) -> managerName }
+            "All of the $managerNames managers are able to manage '${project.id.type}' projects. Please enable only " +
+                "one of them."
+        }
+
+        return dependenciesAccessor(managerName, graph, rootIndices)
+    }
+
+    fun dependenciesAccessor(
+        manager: String,
+        graph: DependencyGraph,
+        rootIndices: List<RootDependencyIndex>
+    ): Sequence<DependencyNode> {
+        val rootDependencies = rootIndices.map { rootIndex ->
+            referenceFor(manager, rootIndex)
         }
 
         return dependenciesSequence(graph, rootDependencies)
     }
 
-    override fun dependenciesForScope(
+    override fun scopeDependencies(
         project: Project,
         scopeName: String,
         maxDepth: Int,
@@ -71,12 +91,20 @@ class DependencyGraphNavigator(
         matcher: DependencyMatcher
     ): Set<Identifier> {
         val dependencies = mutableSetOf<Identifier>()
+        val visited = mutableSetOf<DependencyGraphNode>()
 
         fun traverse(node: DependencyNode) {
+            val cursor = node as DependencyRefCursor
+            if (cursor.current in visited) return
+            visited += cursor.current
+
             if (node.id == packageId) {
-                node.visitDependencies { collectDependencies(it, maxDepth, matcher, dependencies) }
+                node.visitDependencies { collectDependencies(it, maxDepth, matcher, dependencies, visited) }
             }
 
+            // This continues to visit dependencies even after a matching node has been found as there could be multiple
+            // nodes with the same ID in the graph, that each could have different dependencies due to custom resolution
+            // configuration in the build system.
             node.visitDependencies { dependencies ->
                 dependencies.forEach(::traverse)
             }
@@ -90,28 +118,15 @@ class DependencyGraphNavigator(
     }
 
     /**
-     * Return the [DependencyGraph] for the given [package manager][manager] or throw an exception if no such graph
-     * exists.
-     */
-    private fun graphForManager(manager: String): DependencyGraph =
-        requireNotNull(graphs[manager]) { "No DependencyGraph for package manager '$manager' available." }
-
-    /**
-     * Resolve a [DependencyGraphNode] in the [DependencyGraph] for the specified [package manager][manager] with the
-     * given [pkgIndex] and [fragment]. Throw an exception if no such node can be found.
-     */
-    private fun referenceFor(manager: String, pkgIndex: Int, fragment: Int): DependencyGraphNode =
-        requireNotNull(graphDependencyRefMappings[manager])[pkgIndex].find { it.fragment == fragment }
-            ?: throw IllegalArgumentException(
-                "Could not resolve a DependencyReference for index = $pkgIndex and fragment $fragment."
-            )
-
-    /**
      * Resolve a [DependencyGraphNode] in the [DependencyGraph] for the specified [package manager][manager] that
      * corresponds to the given [rootIndex]. Throw an exception if no such reference can be found.
      */
     private fun referenceFor(manager: String, rootIndex: RootDependencyIndex): DependencyGraphNode =
-        referenceFor(manager, rootIndex.root, rootIndex.fragment)
+        requireNotNull(graphDependencyRefMappings[manager])[rootIndex.root].find { it.fragment == rootIndex.fragment }
+            ?: throw IllegalArgumentException(
+                "Could not resolve a DependencyReference for index = ${rootIndex.root} and fragment " +
+                    "${rootIndex.fragment}."
+            )
 }
 
 /**
@@ -147,7 +162,7 @@ private class DependencyRefCursor(
     override val linkage: PackageLinkage
         get() = current.linkage
 
-    override val issues: List<OrtIssue>
+    override val issues: List<Issue>
         get() = current.issues
 
     override fun <T> visitDependencies(block: (Sequence<DependencyNode>) -> T): T =
@@ -188,13 +203,6 @@ private class DependencyRefCursor(
 }
 
 /**
- * Return the name of the package manager that constructed this [Project]. This is required to find the
- * [DependencyGraph] for this project.
- */
-private val Project.managerName: String
-    get() = id.type
-
-/**
  * Construct a data structure that allows fast access to all [DependencyGraphNode]s contained in this
  * [DependencyGraph] based on its index and fragment. This structure is used to lookup specific nodes, typically
  * the entry points in the graph (i.e. the roots of the dependency trees referenced by the single scopes). The
@@ -232,15 +240,15 @@ private fun collectDependencies(
     ids: MutableSet<Identifier>,
     visited: MutableSet<DependencyGraphNode> = mutableSetOf()
 ) {
-    if (maxDepth != 0) {
-        nodes.forEach { node ->
-            val cursor = node as DependencyRefCursor
-            if (cursor.current !in visited) {
-                visited += cursor.current
-                if (matcher(node)) ids += node.id
+    if (maxDepth == 0) return
 
-                node.visitDependencies { collectDependencies(it, maxDepth - 1, matcher, ids, visited) }
-            }
+    nodes.forEach { node ->
+        val cursor = node as DependencyRefCursor
+        if (matcher(node)) ids += node.id
+
+        if (cursor.current !in visited) {
+            visited += cursor.current
+            node.visitDependencies { collectDependencies(it, maxDepth - 1, matcher, ids, visited) }
         }
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,31 +23,27 @@ import org.ossreviewtoolkit.model.RuleViolation
 import org.ossreviewtoolkit.utils.common.collapseWhitespace
 
 /**
- * Defines the resolution of a rule violation. This can be used to silence rule violations that have been identified
- * as not being relevant or are acceptable / approved.
+ * Defines the resolution of a [RuleViolation]. This can be used to silence rule violations that have been identified as
+ * not being relevant or are acceptable / approved.
  */
 data class RuleViolationResolution(
     /**
-     * A regular expression string to match the messages of rule violations to resolve. Will be converted to
-     * a [Regex] using
-     * [RegexOption.DOT_MATCHES_ALL].
+     * A regular expression string to match the messages of rule violations to resolve. Whitespace in the message will
+     * be [collapsed][collapseWhitespace] and it will be converted to a [Regex] using [RegexOption.DOT_MATCHES_ALL].
      */
     val message: String,
 
-    /**
-     * The reason why the rule violation is resolved.
-     */
+    /** The reason why the rule violation is resolved. */
     val reason: RuleViolationResolutionReason,
 
-    /**
-     * A comment to further explain why the [reason] is applicable here.
-     */
+    /** A comment to further explain why the [reason] is applicable here. */
     val comment: String
 ) {
     private val regex = Regex(message.collapseWhitespace(), RegexOption.DOT_MATCHES_ALL)
 
     /**
-     * True if [message] matches the message of [error].
+     * True if [message] matches the message of the [violation]. Whitespace in the message of the [violation] is
+     * [collapsed][collapseWhitespace] before matching.
      */
     fun matches(violation: RuleViolation) = regex.matches(violation.message.collapseWhitespace())
 }

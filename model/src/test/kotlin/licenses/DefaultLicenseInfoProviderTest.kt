@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,10 +22,14 @@ package org.ossreviewtoolkit.model.licenses
 import io.kotest.core.spec.style.WordSpec
 import io.kotest.matchers.shouldBe
 
-import org.ossreviewtoolkit.model.utils.PackageConfigurationProvider
+import org.ossreviewtoolkit.model.authors
+import org.ossreviewtoolkit.model.ortResult
+import org.ossreviewtoolkit.model.packageWithAuthors
+import org.ossreviewtoolkit.model.project
+import org.ossreviewtoolkit.model.projectAuthors
 
 class DefaultLicenseInfoProviderTest : WordSpec({
-    val defaultLicenseInfoProvider = DefaultLicenseInfoProvider(ortResult, PackageConfigurationProvider.EMPTY)
+    val defaultLicenseInfoProvider = DefaultLicenseInfoProvider(ortResult)
 
     "declaredLicenseInfo" should {
         "contain author information for package" {

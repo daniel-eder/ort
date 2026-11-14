@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,29 +19,21 @@
 
 package org.ossreviewtoolkit.model.config
 
-import org.apache.logging.log4j.kotlin.Logging
+import org.apache.logging.log4j.kotlin.logger
 
-/**
- * Configuration of the storage to use for provenance information.
- */
+/** Configuration of the storage to use for provenance information. */
 data class ProvenanceStorageConfiguration(
-    /**
-     * Configuration of a file storage.
-     */
+    /** Configuration of a file storage. */
     val fileStorage: FileStorageConfiguration? = null,
 
-    /**
-     * Configuration of a PostgreSQL storage.
-     */
-    val postgresStorage: PostgresStorageConfiguration? = null,
+    /** Configuration of a PostgreSQL storage. */
+    val postgresStorage: PostgresStorageConfiguration? = null
 ) {
-    companion object : Logging
-
     init {
         if (fileStorage != null && postgresStorage != null) {
             logger.warn {
                 "'fileStorage' and 'postgresStorage' are both configured but only one storage can be used. Using " +
-                        "'fileStorage'."
+                    "'fileStorage'."
             }
         }
     }

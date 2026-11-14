@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,21 +18,29 @@
  */
 
 plugins {
-    // Apply core plugins.
-    `java-library`
+    // Apply precompiled plugins.
+    id("ort-library-conventions")
 }
 
 dependencies {
-    api(project(":model"))
-    api(project(":utils:ort-utils"))
+    api(projects.model)
+    api(libs.hikari)
+    api(libs.kotest.assertions.core)
+    api(libs.kotest.framework.engine)
 
-    api(libs.kotestAssertionsCore)
-    api(libs.kotestFrameworkApi)
+    api(libs.logbackClassic) {
+        because("Transitively export this to consumers so they do not have to declare a logger implementation.")
+    }
 
-    implementation(libs.jacksonModuleKotlin)
-    implementation(libs.kotestExtensionsJunitXml)
-    implementation(libs.kotestFrameworkEngine)
-    implementation(libs.log4jApiToSlf4j)
-    implementation(libs.logbackClassic)
-    implementation(libs.postgresEmbedded)
+    implementation(projects.downloader)
+    implementation(projects.utils.authenticationUtils)
+    implementation(projects.utils.commonUtils)
+    implementation(projects.utils.ortUtils)
+    implementation(jacksonLibs.jacksonModuleKotlin)
+    implementation(libs.diffUtils)
+    implementation(libs.jsonSchemaValidator)
+    implementation(libs.kotest.extensions.testcontainers)
+    implementation(libs.testcontainers.postgresql)
+
+    runtimeOnly(libs.log4j.to.slf4j)
 }

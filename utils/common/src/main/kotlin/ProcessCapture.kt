@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ import java.io.IOException
 
 import kotlin.io.path.createTempDirectory
 
-import org.apache.logging.log4j.kotlin.Logging
+import org.apache.logging.log4j.kotlin.logger
 
 /**
  * An (almost) drop-in replacement for ProcessBuilder that is able to capture huge outputs to the standard output and
@@ -40,7 +40,7 @@ class ProcessCapture(
     // vararg parameters, see https://stackoverflow.com/a/46456379/1127485.
     constructor(workingDir: File?, vararg command: CharSequence) : this(*command, workingDir = workingDir)
 
-    companion object : Logging {
+    companion object {
         private const val MAX_OUTPUT_LINES = 20
         private const val MAX_OUTPUT_FOOTER =
             "(Above output is limited to each $MAX_OUTPUT_LINES heading and tailing lines.)"
@@ -62,59 +62,65 @@ class ProcessCapture(
         }
     }
 
-    private val tempDir = createTempDirectory(javaClass.simpleName).toFile().apply { deleteOnExit() }
-    private val commandName = command.first().toString().substringAfterLast(File.separatorChar)
-    private val stdoutFile = tempDir.resolve("$commandName.stdout").apply { deleteOnExit() }
-    private val stderrFile = tempDir.resolve("$commandName.stderr").apply { deleteOnExit() }
+    private val tempDir = createTempDirectory(javaClass.simpleName).toFile()
+        .also { DeleteOnExitHook.scheduleDeletion(it) }
 
-    /**
-     * Get the standard output stream of the terminated process as a string.
-     */
+    private val commandName = command.first().toString().substringAfterLast(File.separatorChar)
+    private val stdoutFile = tempDir / "$commandName.stdout"
+    private val stderrFile = tempDir / "$commandName.stderr"
+
+    /** Get the standard output of the terminated process as a string. */
     val stdout
         get() = stdoutFile.readText()
 
     /**
-     * Get the standard error stream of the terminated process as a string.
+     * Get the standard output of the terminated process as a stream. The caller is responsible for closing the
+     * stream.
      */
+    val stdoutStream
+        get() = stdoutFile.inputStream()
+
+    /** Get the standard error output of the terminated process as a string. */
     val stderr
         get() = stderrFile.readText()
+
+    /**
+     * Get the standard error output of the terminated process as a stream. The caller is responsible for closing the
+     * stream.
+     */
+    val stderrStream
+        get() = stderrFile.inputStream()
 
     private val builder = ProcessBuilder(*unmaskedStrings(*command))
         .directory(workingDir)
         .redirectOutput(stdoutFile)
         .redirectError(stderrFile)
         .apply {
-            environment().putAll(environment)
+            // Apply the environment filter to the map with inherited variables, but not to the variables added
+            // explicitly via the environment parameter, since these are expected to be always relevant for the command.
+            EnvironmentVariableFilter.filter(environment()).putAll(environment)
         }
 
     val commandLine = command.joinToString(" ")
-    val usedWorkingDir = builder.directory() ?: System.getProperty("user.dir")!!
+    val usedWorkingDir = builder.directory()?.normalize() ?: System.getProperty("user.dir")!!
 
     private val process = builder.start()
 
-    /**
-     * Get the exit value of the terminated process.
-     */
+    /** Get the exit value of the terminated process. */
     val exitValue
         get() = process.exitValue()
 
-    /**
-     * Is true if the process terminated with an error, i.e. the [exitValue] is not 0.
-     */
+    /** Is true if the process terminated with an error, i.e. the [exitValue] is not 0. */
     val isError
         get() = exitValue != 0
 
-    /**
-     * Is true if the process terminated without an error, i.e. the [exitValue] is 0.
-     */
+    /** Is true if the process terminated without an error, i.e. the [exitValue] is 0. */
     val isSuccess
         get() = exitValue == 0
 
-    /**
-     * A generic error message, can be used when [exitValue] is not 0.
-     */
-    val errorMessage
-        get(): String {
+    /** A generic error message, can be used when [exitValue] is not 0. */
+    val errorMessage: String
+        get() {
             // Fall back to stdout for the error message if stderr does not provide meaningful information.
             val message = stderr.takeUnless {
                 val notContainsErrorButStdoutDoes =
@@ -123,7 +129,7 @@ class ProcessCapture(
             } ?: stdout
 
             return "Running '$commandLine' in '$usedWorkingDir' failed with exit code $exitValue:\n" +
-                    limitOutputLines(message)
+                limitOutputLines(message)
         }
 
     init {
@@ -146,8 +152,6 @@ class ProcessCapture(
         }
     }
 
-    /**
-     * Throw an [IOException] in case [exitValue] is not 0.
-     */
+    /** Throw an [IOException] in case [exitValue] is not 0. */
     fun requireSuccess() = also { if (isError) throw IOException(errorMessage) }
 }

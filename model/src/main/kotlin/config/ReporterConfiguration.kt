@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2022 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,16 +19,22 @@
 
 package org.ossreviewtoolkit.model.config
 
-import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.annotation.JsonAlias
+
+import com.sksamuel.hoplite.ConfigAlias
+
+import org.ossreviewtoolkit.plugins.api.PluginConfig
 
 /**
- * The base configuration model of the reporter.
+ * The configuration model of the reporter. This class is (de-)serialized in the following places:
+ * - Deserialized from "config.yml" as part of [OrtConfiguration] (via Hoplite).
  */
 data class ReporterConfiguration(
     /**
-     * Reporter specific configuration options. The key needs to match the name of the reporter class, e.g. "FossId"
-     * for the FossId reporter. See the documentation of the reporter for available options.
+     * Reporter-specific configuration options. The key needs to match the ID of the reporter plugin, e.g. "FossId" for
+     * the "FossIdReporter" class. See the documentation of the reporter for available options.
      */
-    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
-    val options: Map<String, Options>? = null
+    @ConfigAlias("config")
+    @JsonAlias("config")
+    val reporters: Map<String, PluginConfig>? = null
 )

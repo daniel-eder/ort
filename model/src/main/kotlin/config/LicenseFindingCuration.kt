@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,16 +24,15 @@ import com.fasterxml.jackson.databind.annotation.JsonDeserialize
 import com.fasterxml.jackson.databind.annotation.JsonSerialize
 import com.fasterxml.jackson.databind.util.StdConverter
 
-import org.ossreviewtoolkit.utils.spdx.SpdxExpression
+import org.ossreviewtoolkit.utils.ort.SpdxExpressionSortedConverter
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxExpression
 
 /**
  * A curation for a license finding. Use it to correct a license finding or to add a license that was not previously
  * detected.
  */
 data class LicenseFindingCuration(
-    /**
-     * A glob to match the file path of a license finding.
-     */
+    /** A glob to match the file path of a license finding. */
     val path: String,
 
     /**
@@ -57,22 +56,20 @@ data class LicenseFindingCuration(
      * [detectedLicense] or if [detectedLicense] is null.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonSerialize(converter = SpdxExpressionSortedConverter::class)
     val detectedLicense: SpdxExpression? = null,
 
     /**
      * The concluded license as SPDX expression or [org.ossreviewtoolkit.utils.spdx.SpdxConstants.NONE] for no license,
      * see https://spdx.dev/spdx-specification-21-web-version#h.jxpfx0ykyb60.
      */
+    @JsonSerialize(converter = SpdxExpressionSortedConverter::class)
     val concludedLicense: SpdxExpression,
 
-    /**
-     * The reason why the curation was made, out of a predefined choice.
-     */
+    /** The reason why the curation was made, out of a predefined choice. */
     val reason: LicenseFindingCurationReason,
 
-    /**
-     * A comment explaining this [LicenseFindingCuration].
-     */
+    /** A comment explaining this [LicenseFindingCuration]. */
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
     val comment: String = ""
 ) {
@@ -87,14 +84,15 @@ data class LicenseFindingCuration(
     }
 }
 
-class IntListToCsvStringConverter : StdConverter<List<Int>, String>() {
+private class IntListToCsvStringConverter : StdConverter<List<Int>, String>() {
     override fun convert(value: List<Int>): String = value.joinToString(separator = ",")
 }
 
-class CsvStringToIntListConverter : StdConverter<String, List<Int>>() {
-    override fun convert(value: String): List<Int> = value
-        .split(',')
-        .map { it.trim() }
-        .filter { it.isNotEmpty() }
-        .map { it.toInt() }
+private class CsvStringToIntListConverter : StdConverter<String, List<Int>>() {
+    override fun convert(value: String): List<Int> =
+        value
+            .split(',')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .map { it.toInt() }
 }

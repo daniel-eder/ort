@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,18 +21,12 @@ package org.ossreviewtoolkit.analyzer
 
 import java.io.File
 import java.nio.file.FileSystems
-import java.nio.file.FileVisitResult
-import java.nio.file.Files
 import java.nio.file.Path
-import java.nio.file.SimpleFileVisitor
-import java.nio.file.attribute.BasicFileAttributes
-import java.util.ServiceLoader
-import java.util.SortedMap
 
+import kotlin.io.path.invariantSeparatorsPathString
 import kotlin.time.measureTime
 
-import org.apache.logging.log4j.kotlin.Logging
-import org.apache.maven.project.ProjectBuildingException
+import org.apache.logging.log4j.kotlin.logger
 
 import org.ossreviewtoolkit.downloader.VcsHost
 import org.ossreviewtoolkit.downloader.VersionControlSystem
@@ -43,10 +37,13 @@ import org.ossreviewtoolkit.model.ProjectAnalyzerResult
 import org.ossreviewtoolkit.model.VcsInfo
 import org.ossreviewtoolkit.model.VcsType
 import org.ossreviewtoolkit.model.config.AnalyzerConfiguration
-import org.ossreviewtoolkit.model.config.Options
+import org.ossreviewtoolkit.model.config.Excludes
+import org.ossreviewtoolkit.model.config.Includes
 import org.ossreviewtoolkit.model.config.PackageManagerConfiguration
 import org.ossreviewtoolkit.model.config.RepositoryConfiguration
 import org.ossreviewtoolkit.model.createAndLogIssue
+import org.ossreviewtoolkit.model.utils.isPathIncluded
+import org.ossreviewtoolkit.plugins.api.Plugin
 import org.ossreviewtoolkit.utils.common.VCS_DIRECTORIES
 import org.ossreviewtoolkit.utils.common.collectMessages
 import org.ossreviewtoolkit.utils.common.isSymbolicLink
@@ -54,30 +51,13 @@ import org.ossreviewtoolkit.utils.ort.ORT_CONFIG_FILENAME
 import org.ossreviewtoolkit.utils.ort.normalizeVcsUrl
 import org.ossreviewtoolkit.utils.ort.showStackTrace
 
-typealias ManagedProjectFiles = Map<PackageManagerFactory, List<File>>
+typealias ManagedProjectFiles = Map<PackageManager, List<File>>
+typealias ProjectResults = Map<File, List<ProjectAnalyzerResult>>
 
-/**
- * A class representing a package manager that handles software dependencies. The package manager is referred to by its
- * [managerName]. The analysis of any projects and their dependencies starts in the [analysisRoot] directory using the
- * given general [analyzerConfig]. Per-repository configuration is passed in [repoConfig].
- */
-abstract class PackageManager(
-    val managerName: String,
-    val analysisRoot: File,
-    val analyzerConfig: AnalyzerConfiguration,
-    val repoConfig: RepositoryConfiguration
-) {
-    companion object : Logging {
-        private val LOADER = ServiceLoader.load(PackageManagerFactory::class.java)
-
-        /**
-         * All [package manager factories][PackageManagerFactory] available in the classpath, associated by their names.
-         */
-        val ALL: SortedMap<String, PackageManagerFactory> by lazy {
-            LOADER.iterator().asSequence().associateByTo(sortedMapOf(String.CASE_INSENSITIVE_ORDER)) { it.managerName }
-        }
-
-        private val PACKAGE_MANAGER_DIRECTORIES = listOf(
+/** A class to represent a package manager that handles projects of the given [projectType]. */
+abstract class PackageManager(val projectType: String) : Plugin {
+    companion object {
+        private val PACKAGE_MANAGER_DIRECTORIES = setOf(
             // Ignore intermediate build system directories.
             ".gradle",
             ".yarn",
@@ -97,64 +77,83 @@ abstract class PackageManager(
 
         /**
          * Recursively search the [directory] for files managed by any of the [packageManagers]. The search is performed
-         * depth-first so that root project files are found before any subproject files for a specific manager.
+         * depth-first so that root project files are found before any subproject files for a specific manager. Path
+         * excludes defined by the given [excludes] are taken into account; the corresponding directories are skipped.
          */
         fun findManagedFiles(
             directory: File,
-            packageManagers: Collection<PackageManagerFactory> = ALL.values
+            packageManagers: Collection<PackageManager>,
+            excludes: Excludes = Excludes.EMPTY,
+            includes: Includes = Includes.EMPTY
         ): ManagedProjectFiles {
             require(directory.isDirectory) {
                 "The provided path is not a directory: ${directory.absolutePath}"
             }
 
-            val result = mutableMapOf<PackageManagerFactory, MutableList<File>>()
+            logger.debug { "Searching for managed files using the following excludes: $excludes" }
 
-            Files.walkFileTree(
-                directory.toPath(),
-                object : SimpleFileVisitor<Path>() {
-                    override fun preVisitDirectory(dir: Path, attributes: BasicFileAttributes): FileVisitResult {
-                        if (IGNORED_DIRECTORY_MATCHERS.any { it.matches(dir) }) {
-                            logger.info {
-                                "Not analyzing directory '$dir' as it is hard-coded to be ignored."
-                            }
+            val result = mutableMapOf<PackageManager, MutableList<File>>()
+            val rootPath = directory.toPath()
+            val distinctPackageManagers = packageManagers.distinct()
 
-                            return FileVisitResult.SKIP_SUBTREE
+            // Note: Even if the directory is not included and other includes are defined, it has to be walked as
+            // subdirectories or files may be included.
+            directory.walk().onEnter { dir ->
+                val dirAsPath = dir.toPath()
+
+                when {
+                    isIgnoredPath(dirAsPath) -> {
+                        logger.info { "Not analyzing directory '$dir' as it is hard-coded to be ignored." }
+                        false
+                    }
+
+                    excludes.isPathExcluded(rootPath, dirAsPath) -> {
+                        logger.info { "Not analyzing directory '$dir' as it is excluded." }
+                        false
+                    }
+
+                    dir.isSymbolicLink -> {
+                        logger.info { "Not following symbolic link to directory '$dir'." }
+                        false
+                    }
+
+                    else -> true
+                }
+            }.filter { it.isDirectory }.forEach { dir ->
+                val filesInCurrentDir = dir.walk().maxDepth(1).filterTo(mutableListOf()) {
+                    val path = runCatching {
+                        it.toPath()
+                    }.getOrElse { e ->
+                        logger.warn {
+                            "Could not get the path for '$it'. It will not be included due to: ${e.collectMessages()}"
                         }
 
-                        val dirAsFile = dir.toFile()
+                        return@filterTo false
+                    }
 
-                        // Note that although FileVisitOption.FOLLOW_LINKS is not set, this would still follow junctions
-                        // on Windows, so do a better check here.
-                        if (dirAsFile.isSymbolicLink()) {
-                            logger.info { "Not following symbolic link to directory '$dir'." }
-                            return FileVisitResult.SKIP_SUBTREE
-                        }
+                    val relativePath = rootPath.relativize(path).invariantSeparatorsPathString
+                    it.isFile && isPathIncluded(relativePath, excludes, includes)
+                }
 
-                        val filesInDir = dirAsFile.walk().maxDepth(1).filter { it.isFile }.toList()
+                distinctPackageManagers.forEach { manager ->
+                    // Create a list of lists of matching files per glob.
+                    val matchesPerGlob = manager.matchersForDefinitionFiles.mapNotNull { glob ->
+                        // Create a list of files in the current directory that match the current glob.
+                        val filesMatchingGlob = filesInCurrentDir.filter { glob.matches(it.toPath()) }
+                        filesMatchingGlob.takeIf { it.isNotEmpty() }
+                    }
 
-                        packageManagers.distinct().forEach { manager ->
-                            // Create a list of lists of matching files per glob.
-                            val matchesPerGlob = manager.matchersForDefinitionFiles.mapNotNull { glob ->
-                                // Create a list of files in the current directory that match the current glob.
-                                val filesMatchingGlob = filesInDir.filter { glob.matches(it.toPath()) }
-                                filesMatchingGlob.takeIf { it.isNotEmpty() }
-                            }
-
-                            if (matchesPerGlob.isNotEmpty()) {
-                                // Only consider all matches for the first glob that has matches. This is because globs
-                                // are defined in order of priority, and multiple globs may just be alternative ways to
-                                // detect the exact same project.
-                                // That is, at the example of a PIP project, if a directory contains all three files
-                                // "requirements-py2.txt", "requirements-py3.txt" and "setup.py", only consider the
-                                // former two as they match the glob with the highest priority, but ignore "setup.py".
-                                result.getOrPut(manager) { mutableListOf() } += matchesPerGlob.first()
-                            }
-                        }
-
-                        return FileVisitResult.CONTINUE
+                    if (matchesPerGlob.isNotEmpty()) {
+                        // Only consider all matches for the first glob that has matches. This is because globs
+                        // are defined in order of priority, and multiple globs may just be alternative ways to
+                        // detect the exact same project.
+                        // That is, at the example of a PIP project, if a directory contains all three files
+                        // "requirements-py2.txt", "requirements-py3.txt" and "setup.py", only consider the
+                        // former two as they match the glob with the highest priority, but ignore "setup.py".
+                        result.getOrPut(manager) { mutableListOf() } += matchesPerGlob.first()
                     }
                 }
-            )
+            }
 
             return result
         }
@@ -182,7 +181,7 @@ abstract class PackageManager(
                 val mergedVcs = normalizedVcsFromPackage.merge(fallbackVcs)
                 if (mergedVcs != normalizedVcsFromPackage) {
                     // ... but if indeed metadata was enriched, overwrite the URL with the one from the fallback VCS
-                    // information to ensure we get the correct base URL if additional VCS information (like a revision
+                    // information to ensure to get the correct base URL if additional VCS information (like a revision
                     // or path) has been split from the original URL.
                     return mergedVcs.copy(url = fallbackVcs.url)
                 }
@@ -204,17 +203,64 @@ abstract class PackageManager(
             val vcsFromWorkingTree = VersionControlSystem.getPathInfo(projectDir).normalize()
             return vcsFromWorkingTree.merge(processPackageVcs(vcsFromProject, *fallbackUrls))
         }
+
+        /**
+         * Check whether the given [path] is matched by any of the ignored directory matchers. In this case, the path is
+         * not analyzed.
+         */
+        fun isIgnoredPath(path: Path): Boolean = IGNORED_DIRECTORY_MATCHERS.any { it.matches(path) }
+
+        /**
+         * Return an [Excludes] instance to be applied during analysis based on the given [repositoryConfiguration].
+         * If this [AnalyzerConfiguration] has the [AnalyzerConfiguration.skipExcluded] flag set to true, the
+         * excludes configured in [repositoryConfiguration] are actually applied. Otherwise, return an empty [Excludes]
+         * object. This means that all dependencies are collected, and excludes are applied later on the report level.
+         */
+        internal fun AnalyzerConfiguration.excludes(repositoryConfiguration: RepositoryConfiguration): Excludes =
+            repositoryConfiguration.excludes.takeIf { skipExcluded } ?: Excludes.EMPTY
+
+        /**
+         * Return an [Includes] instance to be applied during analysis based on the given [repositoryConfiguration].
+         * If this [AnalyzerConfiguration] has the [AnalyzerConfiguration.skipExcluded] flag set to true, the
+         * includes configured in [repositoryConfiguration] are actually applied. Otherwise, return an empty [Includes]
+         * object. This means that all dependencies are collected, and includes are applied later on the report level.
+         */
+        internal fun AnalyzerConfiguration.includes(repositoryConfiguration: RepositoryConfiguration): Includes =
+            repositoryConfiguration.includes.takeIf { skipExcluded } ?: Includes.EMPTY
+
+        /**
+         * Check whether the given [path] interpreted relatively against [root] is matched by a path exclude in this
+         * [Excludes] object.
+         */
+        private fun Excludes.isPathExcluded(root: Path, path: Path): Boolean =
+            isPathExcluded(root.relativize(path).invariantSeparatorsPathString)
+
+        /**
+         * Get a fallback project name from the [definitionFile] path relative to the [analysisRoot]. This function
+         * should be used if the project name cannot be determined from the project's metadata.
+         */
+        fun getFallbackProjectName(analysisRoot: File, definitionFile: File) =
+            definitionFile.relativeTo(analysisRoot).invariantSeparatorsPath
     }
 
     /**
-     * The [Options] from the [PackageManagerConfiguration] for this [package manager][managerName].
+     * The prioritized list of glob patterns of definition files supported by this package manager. Only all matches of
+     * the first glob having any matches are considered.
      */
-    protected val options: Options = analyzerConfig.getPackageManagerConfiguration(managerName)?.options.orEmpty()
+    abstract val globsForDefinitionFiles: List<String>
 
-    /**
-     * Optional mapping of found [definitionFiles] before dependency resolution.
-     */
-    open fun mapDefinitionFiles(definitionFiles: List<File>): List<File> = definitionFiles
+    val matchersForDefinitionFiles by lazy {
+        globsForDefinitionFiles.map {
+            FileSystems.getDefault().getPathMatcher("glob:**/$it")
+        }
+    }
+
+    /** Optional mapping of found [definitionFiles] before dependency resolution. */
+    open fun mapDefinitionFiles(
+        analysisRoot: File,
+        definitionFiles: List<File>,
+        analyzerConfig: AnalyzerConfiguration
+    ): List<File> = definitionFiles
 
     /**
      * Return if this package manager must run before or after certain other package managers. This can manually be
@@ -222,19 +268,25 @@ abstract class PackageManager(
      * determine such dependencies automatically.
      */
     open fun findPackageManagerDependencies(
-        managedFiles: Map<PackageManager, List<File>>
+        analysisRoot: File,
+        managedFiles: Map<PackageManager, List<File>>,
+        analyzerConfig: AnalyzerConfiguration
     ): PackageManagerDependencyResult =
         PackageManagerDependencyResult(mustRunBefore = emptySet(), mustRunAfter = emptySet())
 
     /**
-     * Optional step to run before dependency resolution, like checking for prerequisites.
+     * Optional step to run before dependency resolution, like checking for prerequisites. This function is called
+     * before [resolveDependencies] is called for any enabled package manager. It does not respect any "mustRunAfter"
+     * configuration.
      */
-    protected open fun beforeResolution(definitionFiles: List<File>) {}
+    open fun beforeResolution(analysisRoot: File, definitionFiles: List<File>, analyzerConfig: AnalyzerConfiguration) {}
 
     /**
-     * Optional step to run after dependency resolution, like cleaning up temporary files.
+     * Optional step to run after dependency resolution, like cleaning up temporary files. This function is called after
+     * [resolveDependencies] has finished for all enabled package managers. It does not respect any "mustRunAfter"
+     * configuration.
      */
-    protected open fun afterResolution(definitionFiles: List<File>) {}
+    open fun afterResolution(analysisRoot: File, definitionFiles: List<File>) {}
 
     /**
      * Generate the final result to be returned by this package manager. This function is called at the very end of the
@@ -242,8 +294,7 @@ abstract class PackageManager(
      * definition files that have been processed. It can be overridden by subclasses to add additional data to the
      * result. This base implementation produces a result that contains only the passed in map with project results.
      */
-    protected open fun createPackageManagerResult(projectResults: Map<File, List<ProjectAnalyzerResult>>):
-            PackageManagerResult = PackageManagerResult(projectResults)
+    protected open fun createPackageManagerResult(projectResults: ProjectResults) = PackageManagerResult(projectResults)
 
     /**
      * Return a tree of resolved dependencies (not necessarily declared dependencies, in case conflicts were resolved)
@@ -252,7 +303,15 @@ abstract class PackageManager(
      * to further stages. They are not interpreted by ORT, but can be used to configure behavior of custom package
      * manager implementations.
      */
-    open fun resolveDependencies(definitionFiles: List<File>, labels: Map<String, String>): PackageManagerResult {
+    @Suppress("LongParameterList")
+    open fun resolveDependencies(
+        analysisRoot: File,
+        definitionFiles: List<File>,
+        excludes: Excludes,
+        includes: Includes,
+        analyzerConfig: AnalyzerConfiguration,
+        labels: Map<String, String>
+    ): PackageManagerResult {
         definitionFiles.forEach { definitionFile ->
             requireNotNull(definitionFile.relativeToOrNull(analysisRoot)) {
                 "'$definitionFile' must be an absolute path below '$analysisRoot'."
@@ -261,84 +320,82 @@ abstract class PackageManager(
 
         val result = mutableMapOf<File, List<ProjectAnalyzerResult>>()
 
-        beforeResolution(definitionFiles)
-
         definitionFiles.forEach { definitionFile ->
             val relativePath = definitionFile.relativeTo(analysisRoot).invariantSeparatorsPath.ifEmpty { "." }
 
-            logger.info { "Resolving $managerName dependencies for path '$relativePath'..." }
+            logger.info { "Using ${descriptor.displayName} to resolve dependencies for path '$relativePath'..." }
 
             val duration = measureTime {
                 runCatching {
-                    result[definitionFile] = resolveDependencies(definitionFile, labels)
+                    result[definitionFile] =
+                        resolveDependencies(analysisRoot, definitionFile, excludes, includes, analyzerConfig, labels)
                 }.onFailure {
                     it.showStackTrace()
 
-                    // In case of Maven we might be able to do better than inferring the name from the path.
-                    val id = if (it is ProjectBuildingException && it.projectId?.isEmpty() == false) {
-                        Identifier("Maven:${it.projectId}")
-                    } else {
-                        Identifier.EMPTY.copy(type = managerName, name = relativePath)
-                    }
+                    val id = Identifier.EMPTY.copy(type = projectType, name = relativePath)
 
                     val projectWithIssues = Project.EMPTY.copy(
                         id = id,
                         definitionFilePath = VersionControlSystem.getPathInfo(definitionFile).path,
                         vcsProcessed = processProjectVcs(definitionFile.parentFile),
                         scopeDependencies = null,
-                        scopeNames = sortedSetOf()
+                        scopeNames = emptySet()
                     )
 
                     val issues = listOf(
                         createAndLogIssue(
-                            source = managerName,
-                            message = "Resolving $managerName dependencies for path '$relativePath' failed with: " +
-                                    it.collectMessages()
+                            "${descriptor.displayName} failed to resolve dependencies for path '$relativePath': " +
+                                it.collectMessages()
                         )
                     )
 
-                    result[definitionFile] = listOf(ProjectAnalyzerResult(projectWithIssues, sortedSetOf(), issues))
+                    result[definitionFile] = listOf(ProjectAnalyzerResult(projectWithIssues, emptySet(), issues))
                 }
             }
 
-            logger.info { "Resolving $managerName dependencies for path '$relativePath' took $duration." }
+            logger.info { "${descriptor.displayName} resolved dependencies for path '$relativePath' in $duration." }
         }
-
-        afterResolution(definitionFiles)
 
         return createPackageManagerResult(result).addDependencyGraphIfMissing()
     }
 
     /**
      * Resolve dependencies for a single absolute [definitionFile] and return a list of [ProjectAnalyzerResult]s, with
-     * one result for each project found in the definition file. The given [labels] are parameters to the overall
-     * analysis of the project and to further stages. They are not interpreted by ORT, but can be used to configure
-     * behavior of custom package manager implementations.
+     * one result for each project found in the definition file. The [excludes] define which scopes should be excluded
+     * from analysis. The given [labels] are parameters to the overall analysis of the project and to further stages.
+     * They are not interpreted by ORT, but can be used to configure behavior of custom package manager implementations.
      */
-    abstract fun resolveDependencies(definitionFile: File, labels: Map<String, String>): List<ProjectAnalyzerResult>
+    abstract fun resolveDependencies(
+        analysisRoot: File,
+        definitionFile: File,
+        excludes: Excludes,
+        includes: Includes,
+        analyzerConfig: AnalyzerConfiguration,
+        labels: Map<String, String>
+    ): List<ProjectAnalyzerResult>
 
-    protected fun requireLockfile(workingDir: File, condition: () -> Boolean) {
-        require(analyzerConfig.allowDynamicVersions || condition()) {
-            val relativePathString = workingDir.relativeTo(analysisRoot).invariantSeparatorsPath
-                .takeUnless { it.isEmpty() } ?: "."
-
-            "No lockfile found in '$relativePathString'. This potentially results in unstable versions of " +
-                    "dependencies. To support this, enable the 'allowDynamicVersions' option in '$ORT_CONFIG_FILENAME'."
+    protected fun requireLockfileForStableVersions(
+        analysisRoot: File,
+        definitionFile: File,
+        allowDynamicVersions: Boolean,
+        hasLockfile: () -> Boolean
+    ) {
+        require(allowDynamicVersions || hasLockfile()) {
+            "No lockfile found for '${definitionFile.relativeTo(analysisRoot)}'. This potentially results in " +
+                "unstable versions of dependencies. To support this, enable the 'allowDynamicVersions' option in " +
+                "'$ORT_CONFIG_FILENAME'."
         }
     }
 
-    /**
-     * Remove all packages from the contained [ProjectAnalyzerResult]s which are also projects.
-     */
-    protected fun Map<File, List<ProjectAnalyzerResult>>.filterProjectPackages():
-            Map<File, List<ProjectAnalyzerResult>> {
+    /** Remove all packages from the contained [ProjectAnalyzerResult]s which are also projects. */
+    protected fun ProjectResults.filterProjectPackages(): ProjectResults {
         val projectIds = flatMapTo(mutableSetOf()) { (_, projectResult) -> projectResult.map { it.project.id } }
 
         return mapValues { entry ->
             entry.value.map { projectResult ->
                 val projectReferences = projectResult.packages.filterTo(mutableSetOf()) { it.id in projectIds }
                 projectResult.takeIf { projectReferences.isEmpty() }
-                    ?: projectResult.copy(packages = (projectResult.packages - projectReferences).toSortedSet())
+                    ?: projectResult.copy(packages = projectResult.packages - projectReferences)
                         .also {
                             logger.info { "Removing ${projectReferences.size} packages that are projects." }
 
@@ -348,16 +405,6 @@ abstract class PackageManager(
         }
     }
 }
-
-/**
- * Parse a string with metadata about an [author] to extract the author name. Many package managers support
- * such author information in string form that contain additional properties like an email address or a
- * homepage. These additional properties are typically separated from the author name by specific [delimiters],
- * e.g. the email address is often surrounded by angle brackets. This function assumes that the author name is the
- * first portion in the given [author] string before one of the given [delimiters] is found.
- */
-fun parseAuthorString(author: String?, vararg delimiters: Char = charArrayOf('<')): String? =
-    author?.split(*delimiters, limit = 2)?.firstOrNull()?.trim()?.ifEmpty { null }
 
 private fun PackageManagerResult.addDependencyGraphIfMissing(): PackageManagerResult {
     // If the condition is true, then [CompatibilityDependencyNavigator] constructs a [DependencyGraphNavigator].

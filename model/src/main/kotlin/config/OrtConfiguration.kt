@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2019 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,47 +19,44 @@
 
 package org.ossreviewtoolkit.model.config
 
+import com.sksamuel.hoplite.ConfigException
+import com.sksamuel.hoplite.ConfigFailure
 import com.sksamuel.hoplite.ConfigLoaderBuilder
+import com.sksamuel.hoplite.Constants
 import com.sksamuel.hoplite.PropertySource
 import com.sksamuel.hoplite.addEnvironmentSource
 import com.sksamuel.hoplite.fp.getOrElse
+import com.sksamuel.hoplite.indent
+import com.sksamuel.hoplite.resolver.context.ContextResolverMode
 
 import java.io.File
 
-import org.apache.logging.log4j.kotlin.Logging
+import org.apache.logging.log4j.kotlin.logger
 
 import org.ossreviewtoolkit.model.Severity
+import org.ossreviewtoolkit.utils.common.EnvironmentVariableFilter
+import org.ossreviewtoolkit.utils.ort.ORT_FAILURE_STATUS_CODE
+import org.ossreviewtoolkit.utils.ort.ORT_PACKAGE_CONFIGURATIONS_DIRNAME
+import org.ossreviewtoolkit.utils.ort.ORT_PACKAGE_CURATIONS_DIRNAME
+import org.ossreviewtoolkit.utils.ort.ORT_PACKAGE_CURATIONS_FILENAME
 
-/**
- * The configuration model for all ORT components.
- */
+/** The configuration model for all ORT components. */
 data class OrtConfiguration(
-    /**
-     * The license file patterns.
-     */
-    val licenseFilePatterns: LicenseFilenamePatterns = LicenseFilenamePatterns.DEFAULT,
-
-    /**
-     * A flag to indicate whether authors should be considered as copyright holders.
-     */
+    /** A flag to indicate whether authors should be considered as copyright holders. */
     val addAuthorsToCopyrights: Boolean = false,
 
     /**
-     * The threshold from which on issues count as severe.
+     * A set with the names of environment variables that are explicitly allowed to be passed to child processes,
+     * even if they are matched by one of the [deniedProcessEnvironmentVariablesSubstrings].
+     * See [EnvironmentVariableFilter] for further details.
      */
-    val severeIssueThreshold: Severity = Severity.WARNING,
+    val allowedProcessEnvironmentVariableNames: Set<String> = EnvironmentVariableFilter.DEFAULT_ALLOW_NAMES,
 
     /**
-     * The threshold from which on rule violations count as severe.
+     * A set with substrings to filter out environment variables before creating child processes to prevent that those
+     * processes can access sensitive information. See [EnvironmentVariableFilter] for further details.
      */
-    val severeRuleViolationThreshold: Severity = Severity.WARNING,
-
-    /**
-     * Enable the usage of project-local package curations from the [RepositoryConfiguration]. If set to true, apply
-     * package curations from a local .ort.yml file before applying those specified via the command line i.e. curations
-     * from the.ort.yml take precedence.
-     */
-    val enableRepositoryPackageCurations: Boolean = false,
+    val deniedProcessEnvironmentVariablesSubstrings: Set<String> = EnvironmentVariableFilter.DEFAULT_DENY_SUBSTRINGS,
 
     /**
      * Enable the usage of project-local package configurations from the [RepositoryConfiguration]. If set to true,
@@ -69,36 +66,98 @@ data class OrtConfiguration(
     val enableRepositoryPackageConfigurations: Boolean = false,
 
     /**
-     * The configuration of the analyzer.
+     * Enable the usage of project-local package curations from the [RepositoryConfiguration]. If set to true, apply
+     * package curations from a local .ort.yml file before applying those specified via the command line i.e. curations
+     * from the .ort.yml take precedence.
      */
+    val enableRepositoryPackageCurations: Boolean = false,
+
+    /**
+     * Enable the usage of risky license mappings. If set to false, risky declared and simple license mappings won't be
+     * applied.
+     */
+    val enableRiskyLicenseMappings: Boolean = true,
+
+    /** Force overwriting of any existing output files. */
+    val forceOverwrite: Boolean = false,
+
+    /**
+     * The license fact providers, ordered from highest to lowest priority. Defaults to the default custom license text
+     * directory, the bundled SPDX license text, and license texts from a local ScanCode installation.
+     */
+    val licenseFactProviders: List<ProviderPluginConfiguration> = listOf(
+        ProviderPluginConfiguration(type = "DefaultCustomLicenseTexts"),
+        ProviderPluginConfiguration(type = "DefaultLicenseTextCuration"),
+        ProviderPluginConfiguration(type = "SPDX"),
+        ProviderPluginConfiguration(type = "ScanCode")
+    ),
+
+    /**
+     * A file containing an additional declared license mapping, which is applied in addition to the built-in one. This
+     * mapping can override entries of the built-in mapping.
+     */
+    val declaredLicenseMappingFile: String? = null,
+
+    /**
+     * A file containing an additional simple license mapping, which is applied in addition to the built-in one. This
+     * mapping can override entries of the built-in mapping.
+     */
+    val simpleLicenseMappingFile: String? = null,
+
+    /** The license file patterns. */
+    val licenseFilePatterns: LicenseFilePatterns = LicenseFilePatterns.DEFAULT,
+
+    /**
+     * The package configuration providers to use. Defaults to the provider [ORT_PACKAGE_CONFIGURATIONS_DIRNAME]
+     * configuration location.
+     */
+    val packageConfigurationProviders: List<ProviderPluginConfiguration> = listOf(
+        ProviderPluginConfiguration(type = "DefaultDir")
+    ),
+
+    /**
+     * The package curation providers to use. Defaults to providers for the default [ORT_PACKAGE_CURATIONS_FILENAME] and
+     * [ORT_PACKAGE_CURATIONS_DIRNAME] configuration locations as well as the provider for Spring packages. The order of
+     * this list defines the priority of the providers: Providers that appear earlier in the list can overwrite
+     * curations for the same package from providers that appear later in the list.
+     */
+    val packageCurationProviders: List<ProviderPluginConfiguration> = listOf(
+        ProviderPluginConfiguration(type = "DefaultDir"),
+        ProviderPluginConfiguration(type = "DefaultFile"),
+        ProviderPluginConfiguration(type = "Spring")
+    ),
+
+    /**
+     * The threshold from which on issues count as severe. Severe issues cause the status code on exit of the CLI
+     * commands to be at least [ORT_FAILURE_STATUS_CODE].
+     */
+    val severeIssueThreshold: Severity = Severity.WARNING,
+
+    /**
+     * The threshold from which on rule violations count as severe. Severe rule violations cause the status code on exit
+     * of the CLI commands to be at least [ORT_FAILURE_STATUS_CODE].
+     */
+    val severeRuleViolationThreshold: Severity = Severity.WARNING,
+
+    /** The configuration of the analyzer. */
     val analyzer: AnalyzerConfiguration = AnalyzerConfiguration(),
 
-    /**
-     * The configuration of the advisors, using the advisor's name as the key.
-     */
+    /** The configuration of the advisors, using the advisor's name as the key. */
     val advisor: AdvisorConfiguration = AdvisorConfiguration(),
 
-    /**
-     * The configuration of the downloader.
-     */
+    /** The configuration of the downloader. */
     val downloader: DownloaderConfiguration = DownloaderConfiguration(),
 
-    /**
-     * The configuration of the scanner.
-     */
+    /** The configuration of the scanner. */
     val scanner: ScannerConfiguration = ScannerConfiguration(),
 
-    /**
-     * The configuration of the reporter.
-     */
+    /** The configuration of the reporter. */
     val reporter: ReporterConfiguration = ReporterConfiguration(),
 
-    /**
-     * The configuration of the notifier.
-     */
+    /** The configuration of the notifier. */
     val notifier: NotifierConfiguration = NotifierConfiguration()
 ) {
-    companion object : Logging {
+    companion object {
         /**
          * Load the [OrtConfiguration]. The different sources are used with this priority:
          *
@@ -119,45 +178,34 @@ data class OrtConfiguration(
                     PropertySource.map(it)
                 },
                 file?.takeIf { it.isFile }?.let {
-                    logger.info { "Using ORT configuration file '$it'." }
+                    logger.info { "Using ORT configuration file '${it.absolutePath}'." }
 
                     PropertySource.file(it)
                 }
             )
 
-            val loader = ConfigLoaderBuilder.default()
+            val loader = ConfigLoaderBuilder.defaultWithoutPropertySources()
                 .addEnvironmentSource()
                 .addPropertySources(sources)
-                .allowUnresolvedSubstitutions()
+                .withContextResolverMode(ContextResolverMode.SkipUnresolved)
                 .build()
 
-            val config = loader.loadConfig<OrtConfigurationWrapper>()
+            val configResult = loader.loadConfig<OrtConfiguration>(prefix = "ort")
+            val config = configResult.getOrElse { failure ->
+                val isFailureDueToEmptyConfig = failure is ConfigFailure.UndefinedTree
+                    || (failure is ConfigFailure.MissingConfigValue && sources.isEmpty())
 
-            return config.getOrElse { failure ->
-                require(sources.isEmpty()) {
-                    "Failed to load ORT configuration: ${failure.description()}"
+                if (!isFailureDueToEmptyConfig) {
+                    val message = "Failed to load ORT configuration:\n${failure.description().indent(Constants.indent)}"
+                    throw ConfigException(message)
                 }
 
-                OrtConfigurationWrapper(OrtConfiguration())
-            }.ort
+                logger.info { "All property sources were empty, falling back to the default configuration." }
+
+                OrtConfiguration()
+            }
+
+            return config
         }
     }
 }
-
-/**
- * A wrapper class to hold an [OrtConfiguration]. This class is needed to correctly map the _ort_ prefix in
- * configuration files when they are processed by the underlying configuration library.
- */
-data class OrtConfigurationWrapper(
-    val ort: OrtConfiguration
-)
-
-/**
- * A typealias for key-value pairs, used in several configuration classes.
- */
-typealias Options = Map<String, String>
-
-/**
- * The filename of the reference configuration file.
- */
-const val REFERENCE_CONFIG_FILENAME = "reference.yml"

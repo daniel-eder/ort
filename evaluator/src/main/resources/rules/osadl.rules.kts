@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2022 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,12 +17,18 @@
  * License-Filename: LICENSE
  */
 
-// The following code uses OSADL's publicly available compatibility matrix for Open Source licenses, see
-// https://www.osadl.org/Access-to-raw-data.oss-compliance-raw-data-access.0.html.
+// The following code uses OSADL's publicly available compatibility matrix for Open Source licenses [1] to check
+// compatibility with the project license, i.e. whether the chosen outbound license is compatible with the inbound
+// licenses. This covers the use-case of publishing an Open Source project with Open Source dependencies. To perform the
+// check, it is sufficient to check compatibility of the licenses of the dependencies (one-way) with the project
+// license [2].
+//
+// [1]: https://www.osadl.org/Access-to-raw-data.oss-compliance-raw-data-access.0.html.
+// [2]: https://github.com/oss-review-toolkit/ort/pull/4977#discussion_r997947353
 //
 // Use this rule like:
 //
-// $ ort evaluate -i scanner/src/funTest/assets/dummy-expected-output-for-analyzer-result.yml --rules-resource /rules/osadl.rules.kts
+// $ ort evaluate -i scanner/src/funTest/resources/scanner-integration-all-pkgs-expected-ort-result.yml --rules-resource /rules/osadl.rules.kts
 
 import org.ossreviewtoolkit.evaluator.osadl.Compatibility
 import org.ossreviewtoolkit.evaluator.osadl.CompatibilityMatrix
@@ -37,11 +43,18 @@ val ruleSet = ruleSet(ortResult, licenseInfoResolver) {
             -isExcluded()
         }
 
-        val projectLicenseInfo = licenseInfoResolver.resolveLicenseInfo(project.id).filter(licenseView)
+        val projectLicenseInfo = licenseInfoResolver.resolveLicenseInfo(project.id).filterExcluded()
+            .applyChoices(ortResult.getRepositoryLicenseChoices(), licenseView)
+
         val outboundLicenses = projectLicenseInfo.licenses.map { it.license }
 
         // Define a rule that is executed for each license of the dependency.
         licenseRule("OSADL_PROJECT_LICENSE_COMPATIBILITY", licenseView) {
+            // Requirements for the rule to trigger a violation.
+            require {
+                -isExcluded()
+            }
+
             outboundLicenses.forEach { outboundLicense ->
                 val compatibilityInfo = CompatibilityMatrix
                     // Be conservative and use the simple license string without the exception string for lookup.
@@ -65,24 +78,25 @@ val ruleSet = ruleSet(ortResult, licenseInfoResolver) {
 
                 when (compatibilityInfo.compatibility) {
                     Compatibility.CONTEXTUAL -> warning(
-                        "Whether the outbound license $outboundLicenseString of project '$projectCoords' is " +
-                                "compatible with the inbound license $inboundLicenseString of its dependency " +
-                                "'$depCoords' depends on the context. " + compatibilityInfo.explanation,
-                        "Get legal advice and eventually create a (global) rule violation resolution."
+                        message = "Whether the outbound license $outboundLicenseString of project '$projectCoords' " +
+                                "is compatible with the inbound license $inboundLicenseString of its dependency " +
+                                "'$depCoords' depends on the context. ${compatibilityInfo.explanation}",
+                        howToFix = "Get legal advice and eventually create a (global) rule violation resolution."
                     )
 
                     Compatibility.UNKNOWN -> warning(
-                        "It is unknown whether the outbound license $outboundLicenseString of project " +
+                        message = "It is unknown whether the outbound license $outboundLicenseString of project " +
                                 "'$projectCoords' is compatible with the inbound license $inboundLicenseString of " +
-                                "its dependency '$depCoords'. " + compatibilityInfo.explanation,
-                        "Get legal advice and eventually create a (global) rule violation resolution."
+                                "its dependency '$depCoords'. ${compatibilityInfo.explanation}",
+                        howToFix = "Get legal advice and eventually create a (global) rule violation resolution."
                     )
 
                     else -> error(
-                        "The outbound license $outboundLicenseString of project '$projectCoords' is incompatible " +
-                                "with the inbound license $inboundLicenseString of its dependency '$depCoords'. " +
-                                compatibilityInfo.explanation,
-                        "Remove the dependency on '$depCoords' or put '$projectCoords' under a different license."
+                        message = "The outbound license $outboundLicenseString of project '$projectCoords' is " +
+                                "incompatible with the inbound license $inboundLicenseString of its dependency " +
+                                "'$depCoords'. ${compatibilityInfo.explanation}",
+                        howToFix = "Remove the dependency on '$depCoords' or put '$projectCoords' under a different " +
+                                "license."
                     )
                 }
             }

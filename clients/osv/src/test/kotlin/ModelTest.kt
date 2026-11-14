@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2022 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,25 +20,21 @@
 package org.ossreviewtoolkit.clients.osv
 
 import io.kotest.assertions.json.shouldEqualJson
+import io.kotest.core.TestConfiguration
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.inspectors.forAll
-
-import java.io.File
-
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.encodeToString
 
 class ModelTest : StringSpec({
     "Deserializing and serializing any vulnerability is idempotent for all official examples" {
         getVulnerabilityExamplesJson().forAll { vulnerabilityJson ->
-            val vulnerability = OsvApiClient.JSON.decodeFromString<Vulnerability>(vulnerabilityJson)
+            val vulnerability = OsvService.JSON.decodeFromString<Vulnerability>(vulnerabilityJson)
 
-            val serializedVulnerabilityJson = OsvApiClient.JSON.encodeToString(vulnerability)
+            val serializedVulnerabilityJson = OsvService.JSON.encodeToString(vulnerability)
 
             serializedVulnerabilityJson shouldEqualJson vulnerabilityJson
         }
     }
 })
 
-private fun getVulnerabilityExamplesJson(): List<String> =
-    (1..7).map { i -> File("src/test/assets/vulnerability/examples/$i.json").readText() }
+private fun TestConfiguration.getVulnerabilityExamplesJson(): List<String> =
+    (1..7).map { i -> javaClass.getResource("/vulnerability-example-$i.json").readText() }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@
 package org.ossreviewtoolkit.scanner.provenance
 
 import io.kotest.assertions.throwables.shouldThrow
+import io.kotest.core.annotation.Tags
 import io.kotest.core.spec.Spec
 import io.kotest.core.spec.style.WordSpec
 import io.kotest.matchers.maps.containExactly
@@ -28,15 +29,16 @@ import io.kotest.matchers.shouldBe
 
 import java.io.IOException
 
+import org.ossreviewtoolkit.downloader.DefaultWorkingTreeCache
 import org.ossreviewtoolkit.model.ArtifactProvenance
 import org.ossreviewtoolkit.model.Hash
 import org.ossreviewtoolkit.model.RemoteArtifact
 import org.ossreviewtoolkit.model.RepositoryProvenance
 import org.ossreviewtoolkit.model.VcsInfo
 import org.ossreviewtoolkit.model.VcsType
-import org.ossreviewtoolkit.scanner.utils.DefaultWorkingTreeCache
 import org.ossreviewtoolkit.utils.common.Os
 
+@Tags("RequiresExternalTool")
 class DefaultNestedProvenanceResolverFunTest : WordSpec() {
     private val workingTreeCache = DefaultWorkingTreeCache()
     private val resolver = DefaultNestedProvenanceResolver(DummyNestedProvenanceStorage(), workingTreeCache)
@@ -47,7 +49,7 @@ class DefaultNestedProvenanceResolverFunTest : WordSpec() {
 
     init {
         "Resolving an artifact provenance" should {
-            "Return only the artifact provenance" {
+            "return only the artifact provenance" {
                 val provenance = ArtifactProvenance(
                     sourceArtifact = RemoteArtifact(
                         url = "",
@@ -56,12 +58,12 @@ class DefaultNestedProvenanceResolverFunTest : WordSpec() {
                 )
 
                 resolver.resolveNestedProvenance(provenance) shouldBe
-                        NestedProvenance(root = provenance, subRepositories = emptyMap())
+                    NestedProvenance(root = provenance, subRepositories = emptyMap())
             }
         }
 
         "Resolving a repository provenance" should {
-            "Return the correct root provenance" {
+            "return the correct root provenance" {
                 val provenance = RepositoryProvenance(
                     vcsInfo = VcsInfo(
                         type = VcsType.GIT,
@@ -72,10 +74,10 @@ class DefaultNestedProvenanceResolverFunTest : WordSpec() {
                 )
 
                 resolver.resolveNestedProvenance(provenance) shouldBe
-                        NestedProvenance(root = provenance, subRepositories = emptyMap())
+                    NestedProvenance(root = provenance, subRepositories = emptyMap())
             }
 
-            "Find recursive Git submodules" {
+            "find recursive Git submodules" {
                 val provenance = RepositoryProvenance(
                     vcsInfo = VcsInfo(
                         type = VcsType.GIT,
@@ -123,7 +125,7 @@ class DefaultNestedProvenanceResolverFunTest : WordSpec() {
                 )
             }
 
-            "Find Git-Repo projects with recursive Git submodules".config(enabled = !Os.isWindows) {
+            "find Git-Repo projects with recursive Git submodules".config(enabled = !Os.isWindows) {
                 val provenance = RepositoryProvenance(
                     vcsInfo = VcsInfo(
                         type = VcsType.GIT_REPO,
@@ -188,7 +190,7 @@ class DefaultNestedProvenanceResolverFunTest : WordSpec() {
                 )
             }
 
-            "Throw an exception if the resolved revision does not exist" {
+            "throw an exception if the resolved revision does not exist" {
                 val provenance = RepositoryProvenance(
                     vcsInfo = VcsInfo(
                         type = VcsType.GIT,
@@ -200,16 +202,25 @@ class DefaultNestedProvenanceResolverFunTest : WordSpec() {
 
                 shouldThrow<IOException> {
                     resolver.resolveNestedProvenance(provenance) shouldBe
-                            NestedProvenance(root = provenance, subRepositories = emptyMap())
+                        NestedProvenance(root = provenance, subRepositories = emptyMap())
                 }
             }
-        }
-    }
-}
 
-internal class DummyNestedProvenanceStorage : NestedProvenanceStorage {
-    override fun readNestedProvenance(root: RepositoryProvenance): NestedProvenanceResolutionResult? = null
-    override fun putNestedProvenance(root: RepositoryProvenance, result: NestedProvenanceResolutionResult) {
-        /** no-op */
+            // Currently disabled due to a bug in the Subversion implementation that causes too much being cloned, see
+            // https://github.com/oss-review-toolkit/ort/issues/2392.
+            "work for Subversion tags".config(enabled = false) {
+                val provenance = RepositoryProvenance(
+                    vcsInfo = VcsInfo(
+                        type = VcsType.SUBVERSION,
+                        url = "https://svn.apache.org/repos/asf/xerces/xml-commons",
+                        revision = "tags/xml-commons-external-1_3_03"
+                    ),
+                    resolvedRevision = "380970"
+                )
+
+                resolver.resolveNestedProvenance(provenance) shouldBe
+                    NestedProvenance(root = provenance, subRepositories = emptyMap())
+            }
+        }
     }
 }

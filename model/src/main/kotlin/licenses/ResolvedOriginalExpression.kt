@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2022 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,20 +20,14 @@
 package org.ossreviewtoolkit.model.licenses
 
 import org.ossreviewtoolkit.model.LicenseSource
-import org.ossreviewtoolkit.utils.spdx.SpdxExpression
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxExpression
 
-/**
- * A resolved original expression.
- */
+/** A resolved original expression. */
 data class ResolvedOriginalExpression(
-    /**
-     * The license expression.
-     */
+    /** The license expression. */
     val expression: SpdxExpression,
 
-    /**
-     * The license source.
-     */
+    /** The license source. */
     val source: LicenseSource,
 
     /**

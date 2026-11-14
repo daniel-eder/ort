@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,44 +20,66 @@
 package org.ossreviewtoolkit.downloader
 
 import io.kotest.core.spec.style.WordSpec
-import io.kotest.matchers.shouldBe
+import io.kotest.matchers.result.shouldBeSuccess
 
-import java.io.File
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.spyk
+
+import java.io.IOException
+
+import org.ossreviewtoolkit.model.Package
+import org.ossreviewtoolkit.model.VcsInfo
+import org.ossreviewtoolkit.model.VcsType
 
 class VersionControlSystemTest : WordSpec({
-    val vcsRoot = File("..").absoluteFile.normalize()
-    val relProjDir = File("src/test")
-    val absProjDir = relProjDir.absoluteFile
+    "getRevisionCandidates()" should {
+        "prefer a matching tag name over a branch name from metadata" {
+            val pkg = Package.EMPTY.copy(
+                vcsProcessed = VcsInfo(
+                    type = VcsType.GIT,
+                    url = "",
+                    revision = "master"
+                )
+            )
 
-    "For an absolute working directory, getPathToRoot()" should {
-        val absVcsDir = VersionControlSystem.forDirectory(absProjDir)!!
+            val workingTree = mockk<WorkingTree>()
+            val vcs = spyk<VersionControlSystem>()
 
-        "work if given absolute paths" {
-            absVcsDir.getPathToRoot(vcsRoot) shouldBe ""
-            absVcsDir.getPathToRoot(vcsRoot.resolve("downloader/src")) shouldBe "downloader/src"
-            absVcsDir.getPathToRoot(absProjDir.resolve("kotlin")) shouldBe "downloader/src/test/kotlin"
+            every { workingTree.guessRevisionName(any(), any()) } returns "v1.6.0"
+
+            vcs.getRevisionCandidates(workingTree, pkg, allowMovingRevisions = true) shouldBeSuccess listOf(
+                "v1.6.0"
+            )
         }
 
-        "work if given relative paths" {
-            absVcsDir.getPathToRoot(File(".")) shouldBe "downloader"
-            absVcsDir.getPathToRoot(File("..")) shouldBe ""
-            absVcsDir.getPathToRoot(File("src/test/kotlin")) shouldBe "downloader/src/test/kotlin"
-        }
-    }
+        "add 'main' as a candidate for Git if otherwise 'master' is the only one" {
+            val pkg = Package.EMPTY.copy(
+                vcsProcessed = VcsInfo(
+                    type = VcsType.GIT,
+                    url = "",
+                    revision = "master"
+                )
+            )
 
-    "For a relative working directory, getPathToRoot()" should {
-        val relVcsDir = VersionControlSystem.forDirectory(relProjDir)!!
+            val workingTree = mockk<WorkingTree>()
+            val vcs = spyk<VersionControlSystem> {
+                every { type } returns VcsType.GIT
+                every { isFixedRevision(any(), "master") } returns Result.success(false)
+                every { isFixedRevision(any(), "main") } returns Result.success(false)
+            }
 
-        "work if given absolute paths" {
-            relVcsDir.getPathToRoot(vcsRoot) shouldBe ""
-            relVcsDir.getPathToRoot(vcsRoot.resolve("downloader/src")) shouldBe "downloader/src"
-            relVcsDir.getPathToRoot(absProjDir.resolve("kotlin")) shouldBe "downloader/src/test/kotlin"
-        }
+            every {
+                workingTree.guessRevisionName(any(), any())
+            } throws IOException("No matching revision name found.")
 
-        "work if given relative paths" {
-            relVcsDir.getPathToRoot(relProjDir) shouldBe "downloader/src/test"
-            relVcsDir.getPathToRoot(File("..")) shouldBe ""
-            relVcsDir.getPathToRoot(File("src/test/kotlin")) shouldBe "downloader/src/test/kotlin"
+            every { workingTree.listRemoteBranches() } returns listOf("main")
+            every { workingTree.listRemoteTags() } returns emptyList()
+
+            vcs.getRevisionCandidates(workingTree, pkg, allowMovingRevisions = true) shouldBeSuccess listOf(
+                "master",
+                "main"
+            )
         }
     }
 })

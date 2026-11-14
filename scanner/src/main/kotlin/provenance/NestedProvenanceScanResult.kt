@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,45 +19,28 @@
 
 package org.ossreviewtoolkit.scanner.provenance
 
-import java.time.Instant
-import java.util.SortedSet
-
-import org.ossreviewtoolkit.model.CopyrightFinding
 import org.ossreviewtoolkit.model.KnownProvenance
-import org.ossreviewtoolkit.model.LicenseFinding
 import org.ossreviewtoolkit.model.OrtResult
 import org.ossreviewtoolkit.model.RepositoryProvenance
 import org.ossreviewtoolkit.model.ScanResult
 import org.ossreviewtoolkit.model.ScanSummary
+import org.ossreviewtoolkit.model.utils.mergeScanResultsByScanner
 
-/**
- * A class that contains all [ScanResult]s for a [NestedProvenance].
- */
+/** A class that contains all [ScanResult]s for a [NestedProvenance]. */
 data class NestedProvenanceScanResult(
-    /**
-     * The [NestedProvenance] which the [scanResults] belong to.
-     */
+    /** The [NestedProvenance] which the [scanResults] belong to. */
     val nestedProvenance: NestedProvenance,
 
-    /**
-     * A map of [KnownProvenance]s from [nestedProvenance] associated with lists of [ScanResult]s.
-     */
-    val scanResults: Map<KnownProvenance, List<ScanResult>>,
+    /** A map of [KnownProvenance]s from [nestedProvenance] associated with lists of [ScanResult]s. */
+    val scanResults: Map<KnownProvenance, List<ScanResult>>
 ) {
-    /**
-     * Return a set of all [KnownProvenance]s contained in [nestedProvenance].
-     */
-    fun getProvenances(): Set<KnownProvenance> = nestedProvenance.getProvenances()
-
     /**
      * Return true if [scanResults] contains at least one scan result for each of the [KnownProvenance]s contained in
      * [nestedProvenance].
      */
-    fun isComplete(): Boolean = getProvenances().all { scanResults[it]?.isNotEmpty() == true }
+    fun isComplete(): Boolean = nestedProvenance.allProvenances.all { scanResults[it]?.isNotEmpty() == true }
 
-    /**
-     * Filter the contained [ScanResult]s using the [predicate].
-     */
+    /** Filter the contained [ScanResult]s using the [predicate]. */
     fun filter(predicate: (ScanResult) -> Boolean): NestedProvenanceScanResult =
         NestedProvenanceScanResult(
             nestedProvenance,
@@ -67,77 +50,16 @@ data class NestedProvenanceScanResult(
     /**
      * Merge the nested [ScanResult]s into one [ScanResult] per used scanner, using the root of the [nestedProvenance]
      * as provenance. This is used to transform this class into the format currently used by [OrtResult].
-     * When merging multiple [ScanSummary]s the earliest start time will be used as the new start time, and the latest
-     * end time will be used as the end time. Because the [ScanSummary] does not contain the checksums of the individual
-     * files, no package verification code can be calculated.
+     * When merging multiple [ScanSummary]s for a particular scanner the earliest start time and lasted end time will
+     * be used as the new values for the respective scanner.
      */
     fun merge(): List<ScanResult> {
-        val allScanners = scanResults.values.flatMapTo(mutableSetOf()) { results -> results.map { it.scanner } }
+        val scanResultsByPath = scanResults.mapKeys { (provenance, _) -> getPath(provenance) }
 
-        return allScanners.map { scanner ->
-            val scanResultsForScanner = scanResults.mapValues { (_, results) ->
-                results.filter { it.scanner == scanner }
-            }
-
-            val allScanResults = scanResults.values.flatten()
-
-            val startTime = allScanResults.minByOrNull { it.summary.startTime }?.summary?.startTime ?: Instant.now()
-            val endTime = allScanResults.maxByOrNull { it.summary.endTime }?.summary?.endTime ?: startTime
-            val issues = allScanResults.flatMap { it.summary.issues }.distinct()
-
-            val licenseFindings = scanResultsForScanner.mergeLicenseFindings()
-            val copyrightFindings = scanResultsForScanner.mergeCopyrightFindings()
-
-            ScanResult(
-                provenance = nestedProvenance.root,
-                scanner = scanner,
-                summary = ScanSummary(
-                    startTime = startTime,
-                    endTime = endTime,
-                    packageVerificationCode = "",
-                    licenseFindings = licenseFindings,
-                    copyrightFindings = copyrightFindings,
-                    issues = issues
-                ),
-                additionalData = allScanResults.map { it.additionalData }.reduce { acc, map -> acc + map }
-            )
-        }
-    }
-
-    private fun Map<KnownProvenance, List<ScanResult>>.mergeLicenseFindings(): SortedSet<LicenseFinding> {
-        val findingsByPath = mapKeys { getPath(it.key) }.mapValues { (_, scanResults) ->
-            scanResults.flatMap { it.summary.licenseFindings }
-        }
-
-        val findings = findingsByPath.flatMapTo(sortedSetOf()) { (path, findings) ->
-            val prefix = if (path.isEmpty()) path else "$path/"
-            findings.map { it.copy(location = it.location.copy(path = "$prefix${it.location.path}")) }
-        }
-
-        return findings
-    }
-
-    private fun Map<KnownProvenance, List<ScanResult>>.mergeCopyrightFindings(): SortedSet<CopyrightFinding> {
-        val findingsByPath = mapKeys { getPath(it.key) }.mapValues { (_, scanResults) ->
-            scanResults.flatMap { it.summary.copyrightFindings }
-        }
-
-        val findings = findingsByPath.flatMapTo(sortedSetOf()) { (path, findings) ->
-            val prefix = if (path.isEmpty()) path else "$path/"
-            findings.map { it.copy(location = it.location.copy(path = "$prefix${it.location.path}")) }
-        }
-
-        return findings
+        return mergeScanResultsByScanner(scanResultsByPath, nestedProvenance.root)
     }
 
     private fun getPath(provenance: KnownProvenance) = nestedProvenance.getPath(provenance)
-
-    fun filterByIgnorePatterns(ignorePatterns: List<String>): NestedProvenanceScanResult =
-        copy(
-            scanResults = scanResults.mapValues { (_, scanResults) ->
-                scanResults.map { it.filterByIgnorePatterns(ignorePatterns) }
-            }
-        )
 
     /**
      * Remove all scan results for [nestedProvenance]s which are not within the provided [path] and filter all findings
@@ -150,21 +72,22 @@ data class NestedProvenanceScanResult(
     fun filterByVcsPath(path: String): NestedProvenanceScanResult {
         if (path.isEmpty()) return this
 
-        val provenances = getProvenances()
-        val provenancesWithVcsPath = provenances.filter { it is RepositoryProvenance && it.vcsInfo.path.isNotBlank() }
+        val provenancesWithVcsPath = nestedProvenance.allProvenances.filter {
+            it is RepositoryProvenance && it.vcsInfo.path.isNotBlank()
+        }
 
         require(provenancesWithVcsPath.isEmpty()) {
             "Cannot filter scan results by VCS path that have a repository provenance with a non-blank VCS path " +
-                    "because their partial scan result might not contain the path to filter for. The following " +
-                    "provenances have a non-blank VCS path: ${provenancesWithVcsPath.joinToString("\n") { "\t$it" }}."
+                "because their partial scan result might not contain the path to filter for. The following " +
+                "provenances have a non-blank VCS path: ${provenancesWithVcsPath.joinToString("\n") { "\t$it" }}."
         }
 
-        val pathsWithinProvenances = provenances.filter {
+        val pathsWithinProvenances = nestedProvenance.allProvenances.filter {
             val provenancePath = getPath(it)
             // Return true if the provenance is on the same branch as the filter path. Otherwise it can be discarded,
             // because all findings would be filtered anyway.
             provenancePath.isEmpty() || provenancePath == path || provenancePath.startsWith("$path/") ||
-                    path.startsWith("$provenancePath/")
+                path.startsWith("$provenancePath/")
         }.associateWith { provenance ->
             val provenancePath = getPath(provenance)
 

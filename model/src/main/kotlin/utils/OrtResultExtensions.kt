@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ package org.ossreviewtoolkit.model.utils
 import org.ossreviewtoolkit.model.OrtResult
 import org.ossreviewtoolkit.model.RepositoryProvenance
 import org.ossreviewtoolkit.model.config.CopyrightGarbage
-import org.ossreviewtoolkit.model.config.LicenseFilenamePatterns
+import org.ossreviewtoolkit.model.config.LicenseFilePatterns
 import org.ossreviewtoolkit.model.licenses.DefaultLicenseInfoProvider
 import org.ossreviewtoolkit.model.licenses.LicenseInfoResolver
 
@@ -31,21 +31,18 @@ import org.ossreviewtoolkit.model.licenses.LicenseInfoResolver
  * instead of calling this function multiple times for better performance.
  */
 fun OrtResult.createLicenseInfoResolver(
-    packageConfigurationProvider: PackageConfigurationProvider = PackageConfigurationProvider.EMPTY,
     copyrightGarbage: CopyrightGarbage = CopyrightGarbage(),
     addAuthorsToCopyrights: Boolean = false,
     archiver: FileArchiver? = null
 ) = LicenseInfoResolver(
-        DefaultLicenseInfoProvider(this, packageConfigurationProvider),
-        copyrightGarbage,
-        addAuthorsToCopyrights,
-        archiver,
-        LicenseFilenamePatterns.getInstance()
-    )
+    DefaultLicenseInfoProvider(this),
+    copyrightGarbage,
+    addAuthorsToCopyrights,
+    archiver,
+    LicenseFilePatterns.getInstance()
+)
 
-/**
- * Return the path where the repository given by [provenance] is linked into the source tree.
- */
+/** Return the path where the repository given by [provenance] is linked into the source tree. */
 fun OrtResult.getRepositoryPath(provenance: RepositoryProvenance): String {
     repository.nestedRepositories.forEach { (path, vcsInfo) ->
         if (vcsInfo.type == provenance.vcsInfo.type
@@ -59,7 +56,5 @@ fun OrtResult.getRepositoryPath(provenance: RepositoryProvenance): String {
     return "/"
 }
 
-/**
- * Copy this [OrtResult] and add all [labels] to the existing labels, overwriting existing labels on conflict.
- */
+/** Copy this [OrtResult] and add all [labels] to the existing labels, overwriting existing labels on conflict. */
 fun OrtResult.mergeLabels(labels: Map<String, String>) = copy(labels = this.labels + labels)

@@ -1,5 +1,5 @@
 <!--
-    Copyright (C) 2022 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+    Copyright (C) 2022 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
 
     Licensed under the Apache License, Version 2.0 (the "License");
     you may not use this file except in compliance with the License.
@@ -32,9 +32,13 @@
     <logger name="org.apache.http.wire" level="ERROR" />
     <logger name="org.eclipse.jgit.internal.storage.file.FileSnapshot" level="ERROR" />
     <logger name="org.ossreviewtoolkit.analyzer.managers.Yarn2" level="INFO" />
+    <logger name="org.ossreviewtoolkit.clients.fossid.LoggingInterceptor" level="INFO" />
     <logger name="org.ossreviewtoolkit.clients.fossid.FossIdRestService" level="INFO" />
-    <logger name="org.ossreviewtoolkit.reporter.reporters.fossid.FossIdReporter" level="INFO" />
-    <logger name="org.ossreviewtoolkit.scanner.scanners.fossid.FossId" level="INFO" />
-    <logger name="org.ossreviewtoolkit.scanner.scanners.fossid.FossIdConfig" level="INFO" />
-    <logger name="org.ossreviewtoolkit.scanner.scanners.fossid.FossIdUrlProvider" level="INFO" />
+    <logger name="org.ossreviewtoolkit.plugins.reporters.fossid.FossIdReporter" level="INFO" />
+    <logger name="org.ossreviewtoolkit.plugins.reporters.fossid.FossIdSnippetReporter" level="INFO" />
+    <logger name="org.ossreviewtoolkit.plugins.scanners.fossid.FossId" level="INFO" />
+    <logger name="org.ossreviewtoolkit.plugins.scanners.fossid.FossIdConfig" level="INFO" />
+    <logger name="org.ossreviewtoolkit.plugins.scanners.fossid.FossIdUrlProvider" level="INFO" />
+    <logger name="org.ossreviewtoolkit.plugins.scanners.fossid.events.CloneRepositoryHandler" level="INFO" />
+    <logger name="org.ossreviewtoolkit.plugins.scanners.fossid.events.UploadArchiveHandler" level="INFO" />
 </configuration>

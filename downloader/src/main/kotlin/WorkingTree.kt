@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -37,7 +37,13 @@ abstract class WorkingTree(val workingDir: File, val vcsType: VcsType) {
      * [workingDir] to [getRootPath]. It is not related to the path argument that was used for downloading, and at the
      * example of Git, it does not reflect the (single) path that was cloned in a sparse checkout.
      */
-    open fun getInfo() = VcsInfo(vcsType, getRemoteUrl(), getRevision(), path = getPathToRoot(workingDir))
+    open fun getInfo() =
+        VcsInfo(
+            type = vcsType,
+            url = runCatching { getRemoteUrl() }.getOrDefault(""),
+            revision = getRevision(),
+            path = getPathToRoot(workingDir)
+        )
 
     /**
      * Return the map of nested repositories, for example Git submodules or Git-Repo modules. The key is the path to the
@@ -45,46 +51,31 @@ abstract class WorkingTree(val workingDir: File, val vcsType: VcsType) {
      */
     open fun getNested() = emptyMap<String, VcsInfo>()
 
-    /**
-     * Return true if the [workingDir] is managed by this VCS, false otherwise.
-     */
+    /** Return true if the [workingDir] is managed by this VCS, false otherwise. */
     abstract fun isValid(): Boolean
 
-    /**
-     * Return whether this is a shallow working tree with truncated history.
-     */
+    /** Return whether this is a shallow working tree with truncated history. */
     abstract fun isShallow(): Boolean
 
-    /**
-     * Return the clone URL of the associated remote repository.
-     */
+    /** Return the clone URL of the associated remote repository. */
     abstract fun getRemoteUrl(): String
 
-    /**
-     * Return the VCS-specific working tree revision.
-     */
+    /** Return the VCS-specific working tree revision. */
     abstract fun getRevision(): String
 
-    /**
-     * Return the root directory of this working tree.
-     */
+    /** Return the root directory of this working tree. */
     abstract fun getRootPath(): File
 
-    /**
-     * Return the list of branches available in the remote repository.
-     */
+    /** Return the list of branches available in the remote repository. */
     abstract fun listRemoteBranches(): List<String>
 
-    /**
-     * Return the list of tags available in the remote repository.
-     */
+    /** Return the list of tags available in the remote repository. */
     abstract fun listRemoteTags(): List<String>
 
     /**
-     * Search (symbolic) names of VCS revisions for a match with the given [project] and [version].
-     *
-     * @return The matching VCS revision, never blank.
-     * @throws IOException If no or multiple matching revisions are found.
+     * Search tags / symbolic names for fixed VCS revisions for a match based on the given [project] and [version].
+     * Return the matching VCS revision (which is never blank), or throw an [IOException] if no or multiple matching
+     * revisions are found.
      */
     fun guessRevisionName(project: String, version: String): String {
         if (version.isBlank()) throw IOException("Cannot guess a revision name from a blank version.")
@@ -96,19 +87,19 @@ abstract class WorkingTree(val workingDir: File, val vcsType: VcsType) {
             versionNames.isEmpty() ->
                 throw IOException(
                     "No matching tag for version '$version' found in $remoteTags. Please create a tag whose name " +
-                            "contains the version."
+                        "contains the version."
                 )
+
             versionNames.size > 1 ->
                 throw IOException(
                     "Multiple matching tags found for version '$version': $versionNames. Please add a curation."
                 )
+
             else -> versionNames.first()
         }
     }
 
-    /**
-     * Return the relative path to [path] with respect to the VCS root.
-     */
+    /** Return the relative path to [path] with respect to the VCS root. */
     fun getPathToRoot(path: File): String {
         val relativePath = path.absoluteFile.relativeTo(getRootPath())
 

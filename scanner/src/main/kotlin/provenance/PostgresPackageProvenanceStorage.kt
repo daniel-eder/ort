@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,33 +21,30 @@ package org.ossreviewtoolkit.scanner.provenance
 
 import javax.sql.DataSource
 
-import org.jetbrains.exposed.dao.id.IntIdTable
-import org.jetbrains.exposed.sql.Database
-import org.jetbrains.exposed.sql.SchemaUtils
-import org.jetbrains.exposed.sql.SchemaUtils.withDataBaseLock
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
-import org.jetbrains.exposed.sql.and
-import org.jetbrains.exposed.sql.deleteWhere
-import org.jetbrains.exposed.sql.insert
-import org.jetbrains.exposed.sql.select
+import org.jetbrains.exposed.v1.core.and
+import org.jetbrains.exposed.v1.core.dao.id.IntIdTable
+import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.jdbc.Database
+import org.jetbrains.exposed.v1.jdbc.SchemaUtils
+import org.jetbrains.exposed.v1.jdbc.SchemaUtils.withDataBaseLock
+import org.jetbrains.exposed.v1.jdbc.deleteWhere
+import org.jetbrains.exposed.v1.jdbc.insert
+import org.jetbrains.exposed.v1.jdbc.selectAll
 
 import org.ossreviewtoolkit.model.Identifier
 import org.ossreviewtoolkit.model.RemoteArtifact
 import org.ossreviewtoolkit.model.VcsInfo
 import org.ossreviewtoolkit.model.utils.DatabaseUtils.checkDatabaseEncoding
+import org.ossreviewtoolkit.model.utils.DatabaseUtils.suspendTransaction
 import org.ossreviewtoolkit.model.utils.DatabaseUtils.tableExists
 import org.ossreviewtoolkit.model.utils.DatabaseUtils.transaction
 import org.ossreviewtoolkit.scanner.storages.utils.jsonb
 
 class PostgresPackageProvenanceStorage(
-    /**
-     * The JDBC data source to obtain database connections.
-     */
+    /** The JDBC data source to obtain database connections. */
     private val dataSource: Lazy<DataSource>,
 
-    /**
-     * The name of the table used for storing package provenances.
-     */
+    /** The name of the table used for storing package provenances. */
     private val tableName: String = "package_provenances"
 ) : PackageProvenanceStorage {
     private val table = PackageProvenances(tableName)
@@ -59,6 +56,7 @@ class PostgresPackageProvenanceStorage(
                 withDataBaseLock {
                     if (!tableExists(tableName)) {
                         checkDatabaseEncoding()
+                        @Suppress("DEPRECATION")
                         SchemaUtils.createMissingTablesAndColumns(table)
                     }
                 }
@@ -66,43 +64,46 @@ class PostgresPackageProvenanceStorage(
         }
     }
 
-    override fun readProvenance(id: Identifier, sourceArtifact: RemoteArtifact): PackageProvenanceResolutionResult? =
-        database.transaction {
-            table.select {
+    override suspend fun readProvenance(
+        id: Identifier,
+        sourceArtifact: RemoteArtifact
+    ): PackageProvenanceResolutionResult? =
+        database.suspendTransaction {
+            table.selectAll().where {
                 table.identifier eq id.toCoordinates() and
-                        (table.artifactUrl eq sourceArtifact.url) and
-                        (table.artifactHash eq sourceArtifact.hash.value)
+                    (table.artifactUrl eq sourceArtifact.url) and
+                    (table.artifactHash eq sourceArtifact.hash.value)
             }.map { it[table.result] }.firstOrNull()
         }
 
-    override fun readProvenance(id: Identifier, vcs: VcsInfo): PackageProvenanceResolutionResult? =
-        database.transaction {
-            table.select {
+    override suspend fun readProvenance(id: Identifier, vcs: VcsInfo): PackageProvenanceResolutionResult? =
+        database.suspendTransaction {
+            table.selectAll().where {
                 table.identifier eq id.toCoordinates() and
-                        (table.vcsType eq vcs.type.toString()) and
-                        (table.vcsUrl eq vcs.url) and
-                        (table.vcsRevision eq vcs.revision) and
-                        (table.vcsPath eq vcs.path)
+                    (table.vcsType eq vcs.type.toString()) and
+                    (table.vcsUrl eq vcs.url) and
+                    (table.vcsRevision eq vcs.revision) and
+                    (table.vcsPath eq vcs.path)
             }.map { it[table.result] }.firstOrNull()
         }
 
-    override fun readProvenances(id: Identifier): List<PackageProvenanceResolutionResult> =
-        database.transaction {
-            table.select {
+    override suspend fun readProvenances(id: Identifier): List<PackageProvenanceResolutionResult> =
+        database.suspendTransaction {
+            table.selectAll().where {
                 table.identifier eq id.toCoordinates()
             }.map { it[table.result] }
         }
 
-    override fun putProvenance(
+    override suspend fun writeProvenance(
         id: Identifier,
         sourceArtifact: RemoteArtifact,
         result: PackageProvenanceResolutionResult
     ) {
-        database.transaction {
+        database.suspendTransaction {
             table.deleteWhere {
                 table.identifier eq id.toCoordinates() and
-                        (table.artifactUrl eq sourceArtifact.url) and
-                        (table.artifactHash eq sourceArtifact.hash.value)
+                    (table.artifactUrl eq sourceArtifact.url) and
+                    (table.artifactHash eq sourceArtifact.hash.value)
             }
 
             table.insert {
@@ -114,14 +115,14 @@ class PostgresPackageProvenanceStorage(
         }
     }
 
-    override fun putProvenance(id: Identifier, vcs: VcsInfo, result: PackageProvenanceResolutionResult) {
-        database.transaction {
+    override suspend fun writeProvenance(id: Identifier, vcs: VcsInfo, result: PackageProvenanceResolutionResult) {
+        database.suspendTransaction {
             table.deleteWhere {
                 table.identifier eq id.toCoordinates() and
-                        (table.vcsType eq vcs.type.toString()) and
-                        (table.vcsUrl eq vcs.url) and
-                        (table.vcsRevision eq vcs.revision) and
-                        (table.vcsPath eq vcs.path)
+                    (table.vcsType eq vcs.type.toString()) and
+                    (table.vcsUrl eq vcs.url) and
+                    (table.vcsRevision eq vcs.revision) and
+                    (table.vcsPath eq vcs.path)
             }
 
             table.insert {
@@ -131,6 +132,14 @@ class PostgresPackageProvenanceStorage(
                 it[vcsRevision] = vcs.revision
                 it[vcsPath] = vcs.path
                 it[table.result] = result
+            }
+        }
+    }
+
+    override suspend fun deleteProvenances(id: Identifier) {
+        database.suspendTransaction {
+            table.deleteWhere {
+                table.identifier eq id.toCoordinates()
             }
         }
     }
@@ -144,7 +153,7 @@ private class PackageProvenances(tableName: String) : IntIdTable(tableName) {
     val vcsUrl = text("vcs_url").nullable()
     val vcsRevision = text("vcs_revision").nullable()
     val vcsPath = text("vcs_path").nullable()
-    val result = jsonb("result", PackageProvenanceResolutionResult::class)
+    val result = jsonb<PackageProvenanceResolutionResult>("result")
 
     init {
         // Indices to prevent duplicate entries.

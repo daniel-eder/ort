@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,49 +20,60 @@
 package org.ossreviewtoolkit.utils.common
 
 import java.io.File
-import java.lang.IllegalArgumentException
 
-/**
- * Operating-System-specific utility functions.
- */
+/** Operating-System-specific utility functions. */
 object Os {
-    /**
-     * The operating system name.
-     */
-    val name = System.getProperty("os.name").orEmpty()
+    enum class Name(private val substring: String) {
+        LINUX("linux"),
+        MAC("mac"),
+        WINDOWS("windows"),
+        UNKNOWN("");
 
-    /**
-     * The operating system name in lower case, for private use.
-     */
-    private val nameLowerCase = name.lowercase()
+        companion object {
+            /** The current operating system's name. */
+            val current = fromString(this())
 
-    /**
-     * Whether the operating system is Linux or not.
-     */
-    val isLinux = "linux" in nameLowerCase
+            operator fun invoke() = System.getProperty("os.name").orEmpty()
 
-    /**
-     * Whether the operating system is macOS or not.
-     */
-    val isMac = "mac" in nameLowerCase
+            fun fromString(name: String) = entries.first { name.contains(it.substring, ignoreCase = true) }
+        }
+    }
 
-    /**
-     * Whether the operating system is Windows or not.
-     */
-    val isWindows = "windows" in nameLowerCase
+    /** A convenience property to indicate whether the operating system is Linux or not. */
+    val isLinux = Name.current == Name.LINUX
 
-    /**
-     * The currently set environment variables. Keys are case-insensitive on Windows.
-     */
+    /** A convenience property to indicate whether the operating system is macOS or not. */
+    val isMac = Name.current == Name.MAC
+
+    /** A convenience property to indicate whether the operating system is Windows or not. */
+    val isWindows = Name.current == Name.WINDOWS
+
+    enum class Arch(private vararg val aliases: String) {
+        X86_64("x86_64", "amd64", "x64"),
+        AARCH64("aarch64", "arm64"),
+        UNKNOWN("");
+
+        companion object {
+            /** The current operating system's architecture. */
+            val current = fromString(this())
+
+            operator fun invoke() = System.getProperty("os.arch").orEmpty()
+
+            fun fromString(name: String) =
+                name.lowercase().let { lowercaseName ->
+                    entries.first { it.aliases.any { alias -> alias in lowercaseName } }
+                }
+        }
+    }
+
+    /** The currently set environment variables. Keys are case-insensitive on Windows. */
     val env by lazy {
         System.getenv().let { env ->
             if (isWindows) env.toSortedMap(String.CASE_INSENSITIVE_ORDER) else env.toSortedMap()
         }
     }
 
-    /**
-     * The current user's home directory.
-     */
+    /** The current user's home directory. */
     val userHomeDirectory by lazy {
         File(fixupUserHomeProperty())
     }
@@ -108,7 +119,7 @@ object Os {
 
             paths.firstNotNullOfOrNull { path ->
                 val expandedPath = path.expandVariable(referencePattern)
-                resolveWindowsExecutable(File(expandedPath, executable))
+                resolveExecutable(File(expandedPath, executable))
             }
         } else {
             val referencePattern = Regex("\\$\\{?(\\w+)}?")
@@ -120,12 +131,10 @@ object Os {
         }
     }
 
-    /**
-     * Resolve the Windows [executable] to its full name including the optional extension.
-     */
-    fun resolveWindowsExecutable(executable: File): File? {
+    /** Resolve the [executable] to its full name including any optional Windows extension. */
+    fun resolveExecutable(executable: File): File? {
         val extensions = env["PATHEXT"]?.splitToSequence(File.pathSeparatorChar).orEmpty()
         return extensions.map { File(executable.path + it.lowercase()) }.find { it.isFile }
-            ?: executable.takeIf { it.isFile }
+            ?: executable.takeIf { it.isFile && it.canExecute() }
     }
 }

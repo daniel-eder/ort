@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2020 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,13 +19,25 @@
 
 package org.ossreviewtoolkit.detekt
 
-import io.gitlab.arturbosch.detekt.api.Config
-import io.gitlab.arturbosch.detekt.api.RuleSet
-import io.gitlab.arturbosch.detekt.api.RuleSetProvider
+import dev.detekt.api.RuleSet
+import dev.detekt.api.RuleSetId
+import dev.detekt.api.RuleSetProvider
 
 class OrtRuleSet : RuleSetProvider {
-    override val ruleSetId: String = "ORT"
+    companion object {
+        val ID = RuleSetId("ORT")
+    }
 
-    override fun instance(config: Config) =
-        RuleSet(ruleSetId, listOf(OrtImportOrder(config), OrtPackageNaming(config)))
+    override val ruleSetId = ID
+
+    override fun instance() =
+        RuleSet(
+            ruleSetId,
+            listOf(
+                ::OrtEmptyLineAfterBlock,
+                ::OrtImportOrder,
+                ::OrtPackageNaming,
+                ::OrtSingleLineKDoc
+            )
+        )
 }

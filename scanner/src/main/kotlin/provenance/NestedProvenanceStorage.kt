@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,13 +22,11 @@ package org.ossreviewtoolkit.scanner.provenance
 import org.ossreviewtoolkit.model.RepositoryProvenance
 import org.ossreviewtoolkit.model.config.ScannerConfiguration
 import org.ossreviewtoolkit.model.utils.DatabaseUtils
-import org.ossreviewtoolkit.scanner.TOOL_NAME
+import org.ossreviewtoolkit.utils.common.div
 import org.ossreviewtoolkit.utils.ort.ortDataDirectory
 import org.ossreviewtoolkit.utils.ort.storage.LocalFileStorage
 
-/**
- * A storage for resolved [NestedProvenance]s.
- */
+/** A storage for resolved [NestedProvenance]s. */
 interface NestedProvenanceStorage {
     companion object {
         /**
@@ -47,34 +45,26 @@ interface NestedProvenanceStorage {
             }
 
             return FileBasedNestedProvenanceStorage(
-                LocalFileStorage(ortDataDirectory.resolve("$TOOL_NAME/nested_provenance"))
+                LocalFileStorage(ortDataDirectory / "scanner" / "nested_provenance")
             )
         }
     }
 
-    /**
-     * Return the [NestedProvenanceResolutionResult] for the [root] provenance, or null if no result was stored.
-     */
-    fun readNestedProvenance(root: RepositoryProvenance): NestedProvenanceResolutionResult?
+    /** Return the [NestedProvenanceResolutionResult] for the [root] provenance, or null if no result was stored. */
+    suspend fun readNestedProvenance(root: RepositoryProvenance): NestedProvenanceResolutionResult?
 
     /**
-     * Put the resolution [result] for the [root] provenance into the storage. If the storage already contains an entry
-     * for [root] it is overwritten.
+     * Write the resolution [result] for the [root] provenance into the storage. If the storage already contains an
+     * entry for [root] it is overwritten.
      */
-    fun putNestedProvenance(root: RepositoryProvenance, result: NestedProvenanceResolutionResult)
+    suspend fun writeNestedProvenance(root: RepositoryProvenance, result: NestedProvenanceResolutionResult)
 }
 
-/**
- * The result of a [NestedProvenance] resolution.
- */
+/** The result of a [NestedProvenance] resolution. */
 data class NestedProvenanceResolutionResult(
-    /**
-     * The resolved [NestedProvenance].
-     */
+    /** The resolved [NestedProvenance]. */
     val nestedProvenance: NestedProvenance,
 
-    /**
-     * True if the revisions of all [RepositoryProvenance.vcsInfo] within [nestedProvenance] are fixed revisions.
-     */
+    /** True if the revisions of all [RepositoryProvenance.vcsInfo] within [nestedProvenance] are fixed revisions. */
     val hasOnlyFixedRevisions: Boolean
 )

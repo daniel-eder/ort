@@ -1,48 +1,67 @@
-# Configuration of detekt rule sets, see https://arturbosch.github.io/detekt/comments.html.
+# Configuration of detekt rule sets, see https://detekt.dev/docs/intro.
 # This file only lists the differences to the default configuration at
-# https://github.com/arturbosch/detekt/blob/master/detekt-cli/src/main/resources/default-detekt-config.yml.
+# https://github.com/detekt/detekt/blob/main/detekt-core/src/main/resources/default-detekt-config.yml.
 
 complexity:
-  ComplexMethod:
-    threshold: 33
+  CyclomaticComplexMethod:
+    allowedComplexity: 25
   LongMethod:
-    threshold: 158
+    allowedLines: 158
   LongParameterList:
-    constructorThreshold: 11
-    functionThreshold: 8
+    allowedConstructorParameters: 11
+    allowedFunctionParameters: 8
   NestedBlockDepth:
-    threshold: 10
+    allowedDepth: 10
   TooManyFunctions:
-    thresholdInClasses: 19
-    thresholdInObjects: 14
+    allowedFunctionsPerClass: 19
+    allowedFunctionsPerObject: 14
 
 coroutines:
   InjectDispatcher:
     active: false
 
-# Formatting rules are implemented via the ktlint plugin. As ktlint does not allow exceptions, we need to disable
-# respective rules completely.
-formatting:
+# Formatting rules are implemented via the ktlint plugin and are the only rules that support auto-formatting. However,
+# as ktlint does not allow to configure exceptions, some rules need to be disabled completely.
+ktlint:
+  AnnotationOnSeparateLine:
+    active: false
+  ArgumentListWrapping:
+    active: false
+  ChainMethodContinuation:
+    active: false
   ChainWrapping:
+    active: false
+  ClassSignature:
+    active: false
+  CommentWrapping:
     active: false
   FinalNewline:
     active: false
+  FunctionSignature:
+    active: true
+    functionBodyExpressionWrapping: multiline
   ImportOrdering:
-    active: false
-  Indentation:
     active: false
   MaximumLineLength:
     active: false
-  NoUnusedImports:
+  NoBlankLineInList:
     active: false
   NoWildcardImports:
     active: false
   ParameterListWrapping:
     active: false
+  SpacingBetweenDeclarationsWithAnnotations:
+    active: false
+  StringTemplateIndent:
+    active: false
+  TrailingCommaOnCallSite:
+    active: true
+    useTrailingCommaOnCallSite: false
+  TrailingCommaOnDeclarationSite:
+    active: true
+    useTrailingCommaOnDeclarationSite: false
 
 naming:
-  ConstructorParameterNaming:
-    excludes: ["**/clients/github-graphql/build/generated/**"]
   InvalidPackageDeclaration:
     active: false
 
@@ -55,38 +74,42 @@ style:
     maxDestructuringEntries: 4
   ForbiddenComment:
     active: false
+  ForbiddenMethodCall:
+    active: true
+    # Use org.ossreviewtoolkit.utils.ort.runBlocking instead in all code that can be used as a library.
+    # One exception to that are the CLI commands.
+    methods: ['kotlinx.coroutines.runBlocking']
   LoopWithTooManyJumpStatements:
     active: false
   MagicNumber:
     active: false
-  MaxLineLength:
-    excludes: ["**/clients/github-graphql/build/generated/**"]
   ReturnCount:
     active: false
-  SpacingBetweenPackageAndImports:
+  SpacingAfterPackageAndImports:
     active: true
   ThrowsCount:
     max: 5
-  UnusedImports:
-    active: true
   WildcardImport:
-    excludes: ''
     excludeImports:
-      - org.ossreviewtoolkit.analyzer.managers.*
-      - org.ossreviewtoolkit.cli.commands.*
-      - org.ossreviewtoolkit.downloader.vcs.*
-      - org.ossreviewtoolkit.helper.commands.*
-      - org.ossreviewtoolkit.reporter.reporters.*
-      - org.ossreviewtoolkit.scanner.scanners.*
-      - org.ossreviewtoolkit.scanner.storages.*
+      - org.ossreviewtoolkit.clihelper.commands.*
       - org.ossreviewtoolkit.utils.spdx.SpdxLicense.*
       - org.ossreviewtoolkit.utils.spdx.SpdxLicenseException.*
       - kotlinx.html.*
       - kotlinx.html.dom.*
 
+potential-bugs:
+  MissingPackageDeclaration:
+    active: true
+    excludes: ["**/GradleModel.kt", "**/*.gradle.kts", "**/buildSrc/src/main/kotlin/*.kt"]
+
 ORT:
+  OrtEmptyLineAfterBlock:
+    active: true
   OrtImportOrder:
     active: true
-    excludes: ["**/clients/github-graphql/build/generated/**"]
+    autoCorrect: true
   OrtPackageNaming:
     active: true
+  OrtSingleLineKDoc:
+    active: true
+    autoCorrect: true

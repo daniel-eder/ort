@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,48 +20,61 @@
 package org.ossreviewtoolkit.scanner
 
 import java.io.File
-import java.nio.file.StandardCopyOption
 import java.time.Instant
 
-import kotlin.io.path.moveTo
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.time.measureTime
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
-import org.apache.logging.log4j.kotlin.Logging
+import org.apache.logging.log4j.kotlin.logger
 
 import org.ossreviewtoolkit.downloader.DownloadException
-import org.ossreviewtoolkit.model.AccessStatistics
+import org.ossreviewtoolkit.model.FileList
 import org.ossreviewtoolkit.model.Identifier
+import org.ossreviewtoolkit.model.Issue
 import org.ossreviewtoolkit.model.KnownProvenance
-import org.ossreviewtoolkit.model.OrtIssue
+import org.ossreviewtoolkit.model.LicenseFinding
 import org.ossreviewtoolkit.model.OrtResult
 import org.ossreviewtoolkit.model.Package
 import org.ossreviewtoolkit.model.PackageType
-import org.ossreviewtoolkit.model.RepositoryProvenance
+import org.ossreviewtoolkit.model.ProvenanceResolutionResult
 import org.ossreviewtoolkit.model.ScanResult
-import org.ossreviewtoolkit.model.ScanSummary
 import org.ossreviewtoolkit.model.ScannerRun
-import org.ossreviewtoolkit.model.Severity
+import org.ossreviewtoolkit.model.TextLocation
+import org.ossreviewtoolkit.model.VcsInfo
 import org.ossreviewtoolkit.model.config.DownloaderConfiguration
-import org.ossreviewtoolkit.model.config.Options
 import org.ossreviewtoolkit.model.config.ScannerConfiguration
 import org.ossreviewtoolkit.model.config.createFileArchiver
+import org.ossreviewtoolkit.model.config.createStorage
+import org.ossreviewtoolkit.model.createAndLogIssue
+import org.ossreviewtoolkit.model.mapLicense
+import org.ossreviewtoolkit.model.utils.FileArchiver
+import org.ossreviewtoolkit.model.utils.ProvenanceFileStorage
+import org.ossreviewtoolkit.model.utils.vcsPath
 import org.ossreviewtoolkit.scanner.provenance.NestedProvenance
 import org.ossreviewtoolkit.scanner.provenance.NestedProvenanceResolver
 import org.ossreviewtoolkit.scanner.provenance.NestedProvenanceScanResult
 import org.ossreviewtoolkit.scanner.provenance.PackageProvenanceResolver
 import org.ossreviewtoolkit.scanner.provenance.ProvenanceDownloader
+import org.ossreviewtoolkit.scanner.utils.FileListResolver
+import org.ossreviewtoolkit.scanner.utils.alignRevisions
+import org.ossreviewtoolkit.scanner.utils.filterScanResultsByVcsPaths
+import org.ossreviewtoolkit.scanner.utils.getVcsPathsForProvenances
 import org.ossreviewtoolkit.utils.common.collectMessages
+import org.ossreviewtoolkit.utils.common.ensureSuffix
 import org.ossreviewtoolkit.utils.common.safeDeleteRecursively
 import org.ossreviewtoolkit.utils.ort.Environment
 import org.ossreviewtoolkit.utils.ort.showStackTrace
+import org.ossreviewtoolkit.utils.spdx.SpdxConstants
+import org.ossreviewtoolkit.utils.spdxexpression.toSpdx
 
-const val TOOL_NAME = "scanner"
-
+@Suppress("LargeClass")
 class Scanner(
     val scannerConfig: ScannerConfiguration,
     val downloaderConfig: DownloaderConfiguration,
@@ -70,124 +83,180 @@ class Scanner(
     val storageWriters: List<ScanStorageWriter>,
     val packageProvenanceResolver: PackageProvenanceResolver,
     val nestedProvenanceResolver: NestedProvenanceResolver,
-    val scannerWrappers: Map<PackageType, List<ScannerWrapper>>
+    val scannerWrappers: Map<PackageType, List<ScannerWrapper>>,
+    private val archiver: FileArchiver? = scannerConfig.archive.createFileArchiver(),
+    fileListStorage: ProvenanceFileStorage = scannerConfig.fileListStorage.createStorage()
 ) {
-    companion object : Logging
-
     init {
         require(scannerWrappers.isNotEmpty() && scannerWrappers.any { it.value.isNotEmpty() }) {
             "At least one ScannerWrapper must be provided."
         }
+
+        scannerWrappers.values.flatten().distinct().forEach { scannerWrapper ->
+            scannerWrapper.matcher?.let { matcher ->
+                require(matcher.matches(scannerWrapper.details)) {
+                    "The scanner details of scanner '${scannerWrapper.details.name}' must satisfy the configured " +
+                        "criteria for looking up scan storage entries."
+                }
+            }
+        }
     }
 
-    private val archiver = scannerConfig.archive.createFileArchiver()
+    private val fileListResolver = FileListResolver(
+        storage = fileListStorage,
+        provenanceDownloader = provenanceDownloader
+    )
 
-    suspend fun scan(ortResult: OrtResult, skipExcluded: Boolean): OrtResult {
+    suspend fun scan(ortResult: OrtResult, skipExcluded: Boolean, labels: Map<String, String>): OrtResult {
+        val projects = ortResult.getProjects(skipExcluded)
+        val projectPackages = projects.mapTo(mutableSetOf()) { it.toPackage() }
+
+        val projectDirRelativeToAnalysisRootForId = projects.associate { project ->
+            project.id to ortResult.getDefinitionFilePathRelativeToAnalyzerRoot(project).substringBeforeLast("/", "")
+        }
+
+        val projectResults = scan(
+            packages = projectPackages,
+            context = ScanContext(
+                labels = ortResult.labels + labels,
+                packageType = PackageType.PROJECT,
+                excludes = ortResult.repository.config.excludes,
+                includes = ortResult.repository.config.includes,
+                detectedLicenseMapping = scannerConfig.detectedLicenseMapping,
+                snippetChoices = ortResult.repository.config.snippetChoices
+            ),
+            projectDirRelativeToAnalysisRootForId = projectDirRelativeToAnalysisRootForId
+        )
+
+        val packages = ortResult.getPackages(skipExcluded)
+            .map { it.metadata }
+            .filterNotConcluded()
+            .filterNotEmptySourceCodeOrigins()
+            .filterNotMetadataOnly()
+            .toSet()
+
+        val packageResults = scan(
+            packages = packages,
+            context = ScanContext(
+                labels = ortResult.labels + labels,
+                packageType = PackageType.PACKAGE,
+                detectedLicenseMapping = scannerConfig.detectedLicenseMapping
+            )
+        )
+
+        val scannerRun = listOfNotNull(projectResults, packageResults).reduce { a, b -> a + b }
+
+        val paddedScannerRun = scannerRun.takeUnless { scannerConfig.includeFilesWithoutFindings }
+            ?: scannerRun.padNoneLicenseFindings()
+
+        return ortResult.copy(scanner = paddedScannerRun)
+    }
+
+    internal suspend fun scan(
+        packages: Set<Package>,
+        context: ScanContext,
+        projectDirRelativeToAnalysisRootForId: Map<Identifier, String> = emptyMap()
+    ): ScannerRun? {
+        val scannerWrappers = scannerWrappers[context.packageType]
+        if (scannerWrappers.isNullOrEmpty()) {
+            logger.info { "Skipping ${context.packageType} scan as no according scanner is configured." }
+            return null
+        }
+
+        logger.info { "Scanning ${packages.size} ${context.packageType}(s) with ${scannerWrappers.size} scanner(s)." }
+
+        val controller = ScanController(packages, scannerWrappers, scannerConfig)
+
         val startTime = Instant.now()
-
-        val projectScannerWrappers = scannerWrappers[PackageType.PROJECT].orEmpty()
-        val packageScannerWrappers = scannerWrappers[PackageType.PACKAGE].orEmpty()
-
-        val projectResults = if (projectScannerWrappers.isNotEmpty()) {
-            val packages = ortResult.getProjects(skipExcluded).mapTo(mutableSetOf()) { it.toPackage() }
-
-            logger.info { "Scanning ${packages.size} project(s) with ${projectScannerWrappers.size} scanner(s)." }
-
-            scan(packages, ScanContext(ortResult.labels, PackageType.PROJECT))
-        } else {
-            logger.info { "Skipping project scan as no project scanner is configured." }
-
-            emptyMap()
-        }
-
-        val packageResults = if (packageScannerWrappers.isNotEmpty()) {
-            val packages = ortResult.getPackages(skipExcluded).map { it.metadata }.filterNotConcluded()
-                .filterNotMetadataOnly().toSet()
-
-            logger.info { "Scanning ${packages.size} package(s) with ${packageScannerWrappers.size} scanner(s)." }
-
-            scan(packages, ScanContext(ortResult.labels, PackageType.PACKAGE))
-        } else {
-            logger.info { "Skipping package scan as no package scanner is configured." }
-
-            emptyMap()
-        }
-
-        val scanResults = (projectResults + packageResults).toSortedMap()
-        val storageStats = AccessStatistics() // TODO: Record access statistics.
-
-        val endTime = Instant.now()
-
-        val filteredScannerOptions = mutableMapOf<String, Options>()
-
-        projectScannerWrappers.forEach { scannerWrapper ->
-            scannerConfig.options?.get(scannerWrapper.name)?.let { options ->
-                filteredScannerOptions[scannerWrapper.name] = scannerWrapper.filterSecretOptions(options)
-            }
-        }
-
-        packageScannerWrappers.forEach { scannerWrapper ->
-            scannerConfig.options?.get(scannerWrapper.name)?.let { options ->
-                filteredScannerOptions[scannerWrapper.name] = scannerWrapper.filterSecretOptions(options)
-            }
-        }
-
-        val filteredScannerConfig = scannerConfig.copy(options = filteredScannerOptions)
-        val scannerRun = ScannerRun(startTime, endTime, Environment(), filteredScannerConfig, scanResults, storageStats)
-
-        return ortResult.copy(scanner = scannerRun)
-    }
-
-    suspend fun scan(packages: Set<Package>, context: ScanContext): Map<Identifier, List<ScanResult>> {
-        val scanners = scannerWrappers[context.packageType].orEmpty()
-        if (scanners.isEmpty()) return emptyMap()
-
-        val controller = ScanController(packages, scanners, scannerConfig)
 
         resolvePackageProvenances(controller)
         resolveNestedProvenances(controller)
 
         readStoredResults(controller)
 
-        runPackageScanners(controller, context)
-        runProvenanceScanners(controller, context)
-        runPathScanners(controller, context)
-
-        createMissingArchives(controller)
-
-        val results = controller.getNestedScanResultsByPackage().entries.associateTo(sortedMapOf()) {
-            it.key.id to it.value.merge()
+        val checkoutPathsForProvenance = if (context.packageType == PackageType.PROJECT) {
+            controller.getCheckoutPathsForProvenance(projectDirRelativeToAnalysisRootForId)
+        } else {
+            emptyMap()
         }
 
-        val issueResults = controller.getResultsForProvenanceResolutionIssues()
+        runPackageScanners(controller, context)
+        runProvenanceScanners(controller, context, checkoutPathsForProvenance)
+        runPathScanners(controller, context, checkoutPathsForProvenance)
 
-        return results + issueResults
+        createFileLists(controller)
+        createMissingArchives(controller)
+
+        val endTime = Instant.now()
+
+        val provenances = packages.mapTo(mutableSetOf()) { pkg ->
+            val packageProvenance = controller.getPackageProvenance(pkg.id)
+
+            ProvenanceResolutionResult(
+                id = pkg.id,
+                packageProvenance = packageProvenance,
+                subRepositories = controller.getSubRepositories(pkg.id),
+                packageProvenanceResolutionIssue = controller.getPackageProvenanceResolutionIssue(pkg.id),
+                nestedProvenanceResolutionIssue = controller.getNestedProvenanceResolutionIssue(pkg.id)
+            ).filterByVcsPath()
+        }
+
+        val vcsPathsForProvenances = getVcsPathsForProvenances(provenances)
+
+        val scanResults = filterScanResultsByVcsPaths(controller.getAllScanResults(), vcsPathsForProvenances)
+
+        val files = controller.getAllFileLists().mapTo(mutableSetOf()) { (provenance, fileList) ->
+            FileList(
+                provenance = provenance.alignRevisions() as KnownProvenance,
+                files = fileList.files.mapTo(mutableSetOf()) { (path, sha1) ->
+                    FileList.Entry(path, sha1)
+                }
+            )
+        }.mapNotNullTo(mutableSetOf()) { fileList ->
+            vcsPathsForProvenances[fileList.provenance]?.let {
+                fileList.filterByVcsPaths(it)
+            }
+        }
+
+        val scannerIds = scannerWrappers.mapTo(mutableSetOf()) { it.descriptor.id }
+        val scanners = packages.associateBy({ it.id }) { scannerIds }
+
+        val issues = controller.getIssues()
+
+        return ScannerRun(
+            startTime = startTime,
+            endTime = endTime,
+            environment = Environment(),
+            config = scannerConfig,
+            provenances = provenances,
+            scanResults = scanResults,
+            files = files,
+            scanners = scanners,
+            issues = issues
+        )
     }
 
     private suspend fun resolvePackageProvenances(controller: ScanController) {
         logger.info { "Resolving provenance for ${controller.packages.size} package(s)." }
 
         val duration = measureTime {
-            withContext(Dispatchers.IO) {
+            withContext(Dispatchers.IO.limitedParallelism(20)) {
                 controller.packages.map { pkg ->
                     async {
                         pkg to runCatching {
                             packageProvenanceResolver.resolveProvenance(pkg, downloaderConfig.sourceCodeOrigins)
+                        }.onFailure {
+                            if (it is CancellationException) currentCoroutineContext().ensureActive()
                         }
                     }
                 }.awaitAll()
             }.forEach { (pkg, result) ->
                 result.onSuccess { provenance ->
-                    controller.addPackageProvenance(pkg.id, provenance)
+                    controller.putPackageProvenance(pkg.id, provenance)
                 }.onFailure {
-                    controller.addProvenanceResolutionIssue(
+                    controller.putPackageProvenanceResolutionIssue(
                         pkg.id,
-                        OrtIssue(
-                            source = TOOL_NAME,
-                            severity = Severity.ERROR,
-                            message = "Could not resolve provenance for package '${pkg.id.toCoordinates()}': " +
-                                    it.collectMessages()
-                        )
+                        Issue(source = "Scanner", message = it.collectMessages())
                     )
                 }
             }
@@ -200,26 +269,27 @@ class Scanner(
         logger.info { "Resolving nested provenances for ${controller.packages.size} package(s)." }
 
         val duration = measureTime {
-            withContext(Dispatchers.IO) {
+            withContext(Dispatchers.IO.limitedParallelism(20)) {
                 controller.getPackageProvenancesWithoutVcsPath().map { provenance ->
                     async {
                         provenance to runCatching {
                             nestedProvenanceResolver.resolveNestedProvenance(provenance)
+                        }.onFailure {
+                            if (it is CancellationException) currentCoroutineContext().ensureActive()
                         }
                     }
                 }.awaitAll()
             }.forEach { (provenance, result) ->
                 result.onSuccess { nestedProvenance ->
-                    controller.addNestedProvenance(provenance, nestedProvenance)
+                    controller.putNestedProvenance(provenance, nestedProvenance)
                 }.onFailure {
                     controller.getPackagesForProvenanceWithoutVcsPath(provenance).forEach { id ->
-                        controller.addProvenanceResolutionIssue(
+                        controller.putNestedProvenanceResolutionIssue(
                             id,
-                            OrtIssue(
-                                source = TOOL_NAME,
-                                severity = Severity.ERROR,
+                            Issue(
+                                source = "Scanner",
                                 message = "Could not resolve nested provenance for package " +
-                                        "'${id.toCoordinates()}': ${it.collectMessages()}"
+                                    "'${id.toCoordinates()}': ${it.collectMessages()}"
                             )
                         )
                     }
@@ -230,10 +300,8 @@ class Scanner(
         logger.info { "Resolved nested provenance for ${controller.packages.size} package(s) in $duration." }
     }
 
-    /**
-     * Run package scanners for packages with incomplete scan results.
-     */
-    private fun runPackageScanners(controller: ScanController, context: ScanContext) {
+    /** Run package scanners for packages with incomplete scan results. */
+    private suspend fun runPackageScanners(controller: ScanController, context: ScanContext) {
         val packagesByProvenance = controller.getPackagesConsolidatedByProvenance()
 
         packagesByProvenance.onEachIndexed { index, (provenance, packages) ->
@@ -244,16 +312,17 @@ class Scanner(
                     val hasNestedProvenance = controller.getNestedProvenance(pkg.id) != null
                     if (!hasNestedProvenance) {
                         logger.debug {
-                            "Skipping scan of '${pkg.id.toCoordinates()}' with package scanner ${scanner.name} as no " +
-                                    "nested provenance for the package could be resolved."
+                            "Skipping scan of '${pkg.id.toCoordinates()}' with package scanner " +
+                                "'${scanner.descriptor.displayName}' as no nested provenance for the package could " +
+                                "be resolved."
                         }
                     }
 
                     val hasCompleteScanResult = controller.hasCompleteScanResult(scanner, pkg)
                     if (hasCompleteScanResult) {
                         logger.debug {
-                            "Skipping scan of '${pkg.id.toCoordinates()}' with package scanner '${scanner.name}' as " +
-                                    "stored results are available."
+                            "Skipping scan of '${pkg.id.toCoordinates()}' with package scanner " +
+                                "'${scanner.descriptor.displayName}' as stored results are available."
                         }
                     }
 
@@ -261,56 +330,82 @@ class Scanner(
                 }
 
                 if (packagesWithIncompleteScanResult.isEmpty()) {
-                    logger.info { "Skipping scan with package scanner '${scanner.name}' as all packages have results." }
+                    logger.info {
+                        "Skipping scan with package scanner '${scanner.descriptor.displayName}' as all packages have " +
+                            "results."
+                    }
+
                     return@scanner
                 }
 
-                // Create a reference package with any VCS path removed, to ensure the full repository is scanned.
-                val referencePackage = packagesWithIncompleteScanResult.first().let { pkg ->
-                    if (provenance is RepositoryProvenance) {
-                        pkg.copy(vcsProcessed = pkg.vcsProcessed.copy(path = ""))
-                    } else {
-                        pkg
-                    }
+                val referencePackage = packagesWithIncompleteScanResult.first()
+                val nestedProvenance = controller.getNestedProvenance(referencePackage.id) ?: return@scanner
+
+                val adjustedContext = context.clearPropertiesIfNeeded(scanner.matcher).copy(
+                    // Tell scanners also about the non-reference packages.
+                    coveredPackages = packagesWithIncompleteScanResult
+                )
+
+                logger.info {
+                    val coveredCoordinates = adjustedContext.coveredPackages.joinToString { it.id.toCoordinates() }
+                    "Starting scan of ${nestedProvenance.root} with package scanner " +
+                        "'${scanner.descriptor.displayName}' which covers the following packages: $coveredCoordinates"
                 }
 
-                if (packagesWithIncompleteScanResult.size > 1) {
+                runCatching {
+                    scanner.scanPackage(nestedProvenance, adjustedContext)
+                }.onSuccess { scanResult ->
                     logger.info {
-                        val packageIds = packagesWithIncompleteScanResult.drop(1)
-                            .joinToString("\n") { "\t${it.id.toCoordinates()}" }
-                        "Scanning package '${referencePackage.id.toCoordinates()}' as reference for these packages " +
-                                "with the same provenance:\n$packageIds"
+                        "Finished scan of ${nestedProvenance.root} with package scanner " +
+                            "'${scanner.descriptor.displayName}'."
                     }
-                }
 
-                logger.info {
-                    "Scan of '${referencePackage.id.toCoordinates()}' with package scanner '${scanner.name} started."
-                }
+                    val nestedProvenanceScanResult = controller.addAndDeduplicateNestedScanResult(
+                        scanner,
+                        scanResult.toNestedProvenanceScanResult(nestedProvenance)
+                    )
 
-                val scanResult = scanner.scanPackage(referencePackage, context)
+                    val provenanceScanResultsToStore = mutableSetOf<Pair<KnownProvenance, ScanResult>>()
+                    packagesWithIncompleteScanResult.forEach { pkg ->
+                        // TODO: Run in coroutine.
+                        if (scanner.writeToStorage) {
+                            storePackageScanResult(pkg, nestedProvenanceScanResult)
 
-                logger.info {
-                    "Scan of '${referencePackage.id.toCoordinates()}' with package scanner '${scanner.name}' finished."
-                }
+                            nestedProvenanceScanResult.scanResults.forEach { (provenance, scanResults) ->
+                                scanResults.forEach { provenanceScanResult ->
+                                    provenanceScanResultsToStore += provenance to provenanceScanResult
+                                }
+                            }
+                        }
+                    }
 
-                packagesWithIncompleteScanResult.forEach processResults@{ pkg ->
-                    val nestedProvenance = controller.getNestedProvenance(pkg.id) ?: return@processResults
-                    val nestedProvenanceScanResult = scanResult.toNestedProvenanceScanResult(nestedProvenance)
-                    controller.addNestedScanResult(scanner, nestedProvenanceScanResult)
+                    // Store only deduplicated provenance scan results.
+                    provenanceScanResultsToStore.forEach { (provenance, provenanceScanResult) ->
+                        storeProvenanceScanResult(provenance, provenanceScanResult)
+                    }
+                }.onFailure { e ->
+                    val issue = scanner.createAndLogIssue(
+                        "Failed to scan $provenance with package scanner '${scanner.descriptor.displayName}': " +
+                            e.collectMessages()
+                    )
 
-                    // TODO: Run in coroutine.
-                    if (scanner.criteria != null) {
-                        storeNestedScanResult(pkg, nestedProvenanceScanResult)
+                    controller.getIdsByProvenance().getValue(provenance).forEach { id ->
+                        controller.addIssue(
+                            id,
+                            issue
+                        )
                     }
                 }
             }
         }
     }
 
-    /**
-     * Run provenance scanners for provenances with missing scan results.
-     */
-    private fun runProvenanceScanners(controller: ScanController, context: ScanContext) {
+    /** Run provenance scanners for provenances with missing scan results. */
+    private suspend fun runProvenanceScanners(
+        controller: ScanController,
+        context: ScanContext,
+        checkoutPathsForProvenance: Map<KnownProvenance, Set<String>>
+    ) {
         val provenances = controller.getAllProvenances()
 
         provenances.forEachIndexed { index, provenance ->
@@ -319,7 +414,7 @@ class Scanner(
                 if (controller.hasScanResult(scanner, provenance)) {
                     logger.debug {
                         "Skipping $provenance scan (${index + 1} of ${provenances.size}) with provenance scanner " +
-                                "'${scanner.name}' as a result is already available."
+                            "'${scanner.descriptor.displayName}' as a result is already available."
                     }
 
                     return@scanner
@@ -327,28 +422,48 @@ class Scanner(
 
                 logger.info {
                     "Scanning $provenance (${index + 1} of ${provenances.size}) with provenance scanner " +
-                            "'${scanner.name}'."
+                        "'${scanner.descriptor.displayName}'."
                 }
 
-                val scanResult = scanner.scanProvenance(provenance, context)
+                val adjustedContext = context
+                    .clearPropertiesIfNeeded(scanner.matcher)
+                    .setCheckoutPaths(provenance, checkoutPathsForProvenance)
 
-                val completedPackages = controller.getPackagesCompletedByProvenance(scanner, provenance)
+                runCatching {
+                    scanner.scanProvenance(provenance, adjustedContext)
+                }.onSuccess { scanResult ->
+                    val completedPackages = controller.getPackagesCompletedByProvenance(scanner, provenance)
 
-                controller.addScanResults(scanner, provenance, listOf(scanResult))
+                    controller.addAndDeduplicateScanResults(scanner, provenance, listOf(scanResult))
 
-                storeProvenanceScanResult(provenance, scanResult)
+                    storeProvenanceScanResult(provenance, scanResult)
 
-                completedPackages.forEach { pkg ->
-                    controller.getNestedScanResult(pkg.id)?.let { storePackageScanResult(pkg, it) }
+                    completedPackages.forEach { pkg ->
+                        controller.getNestedScanResult(pkg.id)?.let { storePackageScanResult(pkg, it) }
+                    }
+                }.onFailure { e ->
+                    val issue = scanner.createAndLogIssue(
+                        "Failed to scan $provenance with provenance scanner '${scanner.descriptor.displayName}': " +
+                            e.collectMessages()
+                    )
+
+                    controller.getIdsByProvenance().getValue(provenance).forEach { id ->
+                        controller.addIssue(
+                            id,
+                            issue
+                        )
+                    }
                 }
             }
         }
     }
 
-    /**
-     * Run path scanners for provenances with missing scan results.
-     */
-    private fun runPathScanners(controller: ScanController, context: ScanContext) {
+    /** Run path scanners for provenances with missing scan results. */
+    private suspend fun runPathScanners(
+        controller: ScanController,
+        context: ScanContext,
+        checkoutPathsForProvenance: Map<KnownProvenance, Set<String>>
+    ) {
         val provenances = controller.getAllProvenances()
 
         provenances.forEachIndexed { index, provenance ->
@@ -366,12 +481,17 @@ class Scanner(
 
             logger.info { "Scanning $provenance (${index + 1} of ${provenances.size})..." }
 
-            val scanResults = scanPath(provenance, scannersWithoutResults, context)
+            val scanResults = scanPath(
+                provenance = provenance,
+                scanners = scannersWithoutResults,
+                context = context.setCheckoutPaths(provenance, checkoutPathsForProvenance),
+                controller = controller
+            )
 
             scanResults.forEach { (scanner, scanResult) ->
                 val completedPackages = controller.getPackagesCompletedByProvenance(scanner, provenance)
 
-                controller.addScanResults(scanner, provenance, listOf(scanResult))
+                controller.addAndDeduplicateScanResults(scanner, provenance, listOf(scanResult))
 
                 storeProvenanceScanResult(provenance, scanResult)
 
@@ -394,6 +514,17 @@ class Scanner(
                 keep
             }
 
+    private fun Collection<Package>.filterNotEmptySourceCodeOrigins(): List<Package> =
+        partition { it.sourceCodeOrigins?.isEmpty() == true }.let { (skip, keep) ->
+            if (skip.isNotEmpty()) {
+                logger.debug {
+                    "Not scanning the following package(s) with empty source code origins: $skip"
+                }
+            }
+
+            keep
+        }
+
     private fun Collection<Package>.filterNotMetadataOnly(): List<Package> =
         partition { it.isMetadataOnly }.let { (skip, keep) ->
             if (skip.isNotEmpty()) {
@@ -405,10 +536,10 @@ class Scanner(
             keep
         }
 
-    private fun readStoredResults(controller: ScanController) {
+    private suspend fun readStoredResults(controller: ScanController) {
         logger.info {
             "Reading stored scan results for ${controller.getPackageProvenancesWithoutVcsPath().size} package(s) " +
-                    "with ${controller.getAllProvenances().size} provenance(s)."
+                "with ${controller.getAllProvenances().size} provenance(s)."
         }
 
         val readDuration = measureTime {
@@ -422,33 +553,37 @@ class Scanner(
         controller.scanners.forEach { scanner ->
             val results = controller.getScanResults(scanner)
             logger.info {
-                "\t${scanner.name}: Result(s) for ${results.size} of ${allKnownProvenances.size} provenance(s)."
+                "\t${scanner.descriptor.displayName}: Result(s) for ${results.size} of ${allKnownProvenances.size} " +
+                    "provenance(s)."
             }
         }
     }
 
-    private fun readStoredPackageResults(controller: ScanController) {
+    private suspend fun readStoredPackageResults(controller: ScanController) {
         controller.scanners.forEach { scanner ->
-            val scannerCriteria = scanner.criteria ?: return@forEach
+            val scannerMatcher = scanner.matcher ?: return@forEach
+            if (!scanner.readFromStorage) return@forEach
 
             controller.packages.forEach pkg@{ pkg ->
-                val nestedProvenance = controller.findNestedProvenance(pkg.id) ?: return@pkg
+                val nestedProvenance = controller.getNestedProvenance(pkg.id) ?: return@pkg
 
                 storageReaders.filterIsInstance<PackageBasedScanStorageReader>().forEach { reader ->
                     if (controller.hasCompleteScanResult(scanner, pkg)) return@pkg
 
                     runCatching {
-                        reader.read(pkg, nestedProvenance, scannerCriteria)
+                        reader.read(pkg, nestedProvenance, scannerMatcher)
                     }.onSuccess { results ->
                         results.forEach { result ->
-                            controller.addNestedScanResult(scanner, result)
+                            controller.addAndDeduplicateNestedScanResult(scanner, result)
                         }
                     }.onFailure { e ->
+                        if (e is CancellationException) throw e
+
                         e.showStackTrace()
 
                         logger.warn {
                             "Could not read scan result for '${pkg.id.toCoordinates()}' from " +
-                                    "${reader.javaClass.simpleName}: ${e.collectMessages()}"
+                                "${reader.javaClass.simpleName}: ${e.collectMessages()}"
                         }
                     }
                 }
@@ -456,24 +591,27 @@ class Scanner(
         }
     }
 
-    private fun readStoredProvenanceResults(controller: ScanController) {
+    private suspend fun readStoredProvenanceResults(controller: ScanController) {
         controller.scanners.forEach { scanner ->
-            val scannerCriteria = scanner.criteria ?: return@forEach
+            val scannerMatcher = scanner.matcher ?: return@forEach
+            if (!scanner.readFromStorage) return@forEach
 
             controller.getAllProvenances().forEach provenance@{ provenance ->
                 if (controller.hasScanResult(scanner, provenance)) return@provenance
 
                 storageReaders.filterIsInstance<ProvenanceBasedScanStorageReader>().forEach { reader ->
                     runCatching {
-                        reader.read(provenance, scannerCriteria)
+                        reader.read(provenance, scannerMatcher)
                     }.onSuccess { results ->
-                        controller.addScanResults(scanner, provenance, results)
+                        controller.addAndDeduplicateScanResults(scanner, provenance, results)
                     }.onFailure { e ->
+                        if (e is CancellationException) throw e
+
                         e.showStackTrace()
 
                         logger.warn {
                             "Could not read scan result for $provenance from ${reader.javaClass.simpleName}: " +
-                                    e.collectMessages()
+                                e.collectMessages()
                         }
                     }
                 }
@@ -484,94 +622,150 @@ class Scanner(
     private fun scanPath(
         provenance: KnownProvenance,
         scanners: List<PathScannerWrapper>,
-        context: ScanContext
+        context: ScanContext,
+        controller: ScanController
     ): Map<PathScannerWrapper, ScanResult> {
         val downloadDir = try {
             provenanceDownloader.download(provenance)
         } catch (e: DownloadException) {
-            val message = "Could not download provenance $provenance: ${e.collectMessages()}"
-            logger.error { message }
-
-            val summary = ScanSummary(
-                startTime = Instant.now(),
-                endTime = Instant.now(),
-                packageVerificationCode = "",
-                licenseFindings = sortedSetOf(),
-                copyrightFindings = sortedSetOf(),
-                issues = listOf(
-                    OrtIssue(
-                        source = "Downloader",
-                        message = message,
-                        severity = Severity.ERROR
-                    )
-                )
+            val issue = createAndLogIssue(
+                "Downloader", "Could not download provenance $provenance: ${e.collectMessages()}"
             )
 
-            return scanners.associateWith { scanner ->
-                ScanResult(
-                    provenance = provenance,
-                    scanner = scanner.details,
-                    summary = summary
+            controller.getIdsByProvenance().getValue(provenance).forEach { id ->
+                controller.addIssue(
+                    id,
+                    issue
                 )
             }
+
+            return emptyMap()
         }
 
-        return try {
-            scanners.associateWith { scanner ->
-                logger.info { "Scan of $provenance with path scanner '${scanner.name}' started." }
+        val results = scanners.mapNotNull { scanner ->
+            logger.info { "Scan of $provenance with path scanner '${scanner.descriptor.displayName}' started." }
 
-                val summary = scanner.scanPath(downloadDir, context)
-
-                logger.info { "Scan of $provenance with path scanner '${scanner.name}' finished." }
-
-                ScanResult(provenance, scanner.details, summary)
+            // Filter the scan context to hide the includes and excludes from scanner with scan matcher.
+            val filteredContext = if (scanner.matcher == null) {
+                context
+            } else {
+                context.copy(excludes = null, includes = null)
             }
-        } finally {
-            downloadDir.safeDeleteRecursively(force = true)
-        }
+
+            val summary = runCatching {
+                scanner.scanPath(downloadDir, filteredContext)
+            }.onFailure { e ->
+                val issue = scanner.createAndLogIssue(
+                    "Failed to scan $provenance with path scanner '${scanner.descriptor.displayName}': " +
+                        e.collectMessages()
+                )
+
+                controller.getIdsByProvenance().getValue(provenance).forEach { id ->
+                    controller.addIssue(
+                        id,
+                        issue
+                    )
+                }
+            }.getOrNull()
+
+            logger.info { "Scan of $provenance with path scanner '${scanner.descriptor.displayName}' finished." }
+
+            summary?.let {
+                val summaryWithMappedLicenses = summary.copy(
+                    licenseFindings = summary.licenseFindings.mapTo(mutableSetOf()) { finding ->
+                        val licenseString = finding.license.toString()
+                        finding.copy(
+                            license = licenseString.mapLicense(scannerConfig.detectedLicenseMapping).toSpdx(),
+                            location = finding.location.withRelativePath(downloadDir)
+                        )
+                    }
+                )
+
+                scanner to ScanResult(provenance, scanner.details, summaryWithMappedLicenses)
+            }
+        }.toMap()
+
+        downloadDir.safeDeleteRecursively()
+
+        return results
     }
 
-    private fun storeNestedScanResult(pkg: Package, nestedProvenanceScanResult: NestedProvenanceScanResult) {
-        storePackageScanResult(pkg, nestedProvenanceScanResult)
-
-        nestedProvenanceScanResult.scanResults.forEach { (provenance, scanResults) ->
-            scanResults.forEach { scanResult ->
-                storeProvenanceScanResult(provenance, scanResult)
-            }
-        }
-    }
-
-    private fun storeProvenanceScanResult(provenance: KnownProvenance, scanResult: ScanResult) {
+    private suspend fun storeProvenanceScanResult(provenance: KnownProvenance, scanResult: ScanResult) {
         storageWriters.filterIsInstance<ProvenanceBasedScanStorageWriter>().forEach { writer ->
             runCatching {
                 writer.write(scanResult)
             }.onFailure { e ->
+                if (e is CancellationException) throw e
+
                 e.showStackTrace()
 
                 logger.warn {
                     "Could not write scan result for $provenance to ${writer.javaClass.simpleName}: " +
-                            e.collectMessages()
+                        e.collectMessages()
                 }
             }
         }
     }
 
-    private fun storePackageScanResult(pkg: Package, nestedProvenanceScanResult: NestedProvenanceScanResult) {
+    private suspend fun storePackageScanResult(pkg: Package, nestedProvenanceScanResult: NestedProvenanceScanResult) {
         storageWriters.filterIsInstance<PackageBasedScanStorageWriter>().forEach { writer ->
             runCatching {
                 writer.write(pkg, nestedProvenanceScanResult)
             }.onFailure { e ->
+                if (e is CancellationException) throw e
+
                 e.showStackTrace()
 
                 logger.warn {
                     "Could not write scan result for '${pkg.id.toCoordinates()}' to ${writer.javaClass.simpleName}: " +
-                            e.collectMessages()
+                        e.collectMessages()
                 }
             }
         }
     }
 
-    private fun createMissingArchives(controller: ScanController) {
+    private suspend fun createFileLists(controller: ScanController) {
+        val idsByProvenance = controller.getIdsByProvenance()
+        val provenances = idsByProvenance.keys
+
+        logger.info { "Creating file lists for ${provenances.size} provenances." }
+
+        val duration = measureTime {
+            withContext(Dispatchers.IO.limitedParallelism(20)) {
+                provenances.mapIndexed { index, provenance ->
+                    async {
+                        logger.info {
+                            "Creating file list for provenance ${index + 1} of ${provenances.size}."
+                        }
+
+                        provenance to runCatching {
+                            fileListResolver.resolve(provenance)
+                        }
+                    }
+                }.awaitAll().forEach { (provenance, result) ->
+                    result.onSuccess { fileList ->
+                        controller.putFileList(provenance, fileList)
+                    }.onFailure { e ->
+                        e.showStackTrace()
+
+                        idsByProvenance.getValue(provenance).forEach { id ->
+                            val issue = createAndLogIssue(
+                                source = "Downloader",
+                                message = "Could not create file list for " +
+                                    "'${id.toCoordinates()}': ${e.collectMessages()}"
+                            )
+
+                            controller.addIssue(id, issue)
+                        }
+                    }
+                }
+            }
+        }
+
+        logger.info { "Created file lists for ${provenances.size} provenances in $duration." }
+    }
+
+    private suspend fun createMissingArchives(controller: ScanController) {
         // TODO: The archives are currently created in a way compatible with the existing implementation in the
         //       PathScanner. This allows to keep using existing file archives without changing the logic used to
         //       access those archives in the reporter. To achieve this nested provenances are downloaded recursively,
@@ -587,45 +781,44 @@ class Scanner(
         val provenancesWithMissingArchives = controller.getNestedProvenancesByPackage()
             .filterNot { (_, nestedProvenance) -> archiver.hasArchive(nestedProvenance.root) }
 
-        logger.info { "Creating file archives for ${provenancesWithMissingArchives.size} package(s)." }
+        if (provenancesWithMissingArchives.isEmpty()) return
+
+        val packagesByProvenance = provenancesWithMissingArchives.entries.groupBy { it.value }
+            .mapValues { e -> e.value.map { it.key } }
+        logger.info {
+            "Creating file archives for ${provenancesWithMissingArchives.size} package(s) from " +
+                "${packagesByProvenance.size} provenance(s)."
+        }
 
         val duration = measureTime {
-            provenancesWithMissingArchives.forEach { (pkg, nestedProvenance) ->
-                runCatching {
-                    downloadRecursively(nestedProvenance)
-                }.onSuccess { dir ->
+            packagesByProvenance.forEach { (nestedProvenance, packages) ->
+                var dir: File? = null
+
+                // runCatching has a bug with smart-cast, see https://youtrack.jetbrains.com/issue/KT-27748.
+                try {
+                    dir = provenanceDownloader.downloadRecursively(nestedProvenance)
                     archiver.archive(dir, nestedProvenance.root)
-                    dir.safeDeleteRecursively(force = true)
-                }.onFailure {
-                    controller.addIssue(
-                        pkg.id,
-                        OrtIssue(
-                            source = "Downloader",
-                            message = "Could not create file archive for " +
-                                    "'${pkg.id.toCoordinates()}': ${it.collectMessages()}",
-                            severity = Severity.ERROR
+                } catch (e: DownloadException) {
+                    packages.forEach { pkg ->
+                        controller.addIssue(
+                            pkg.id,
+                            Issue(
+                                source = "Scanner",
+                                message = "Could not create file archive for '${pkg.id.toCoordinates()}': "
+                                    + e.collectMessages()
+                            )
                         )
-                    )
+                    }
+                } finally {
+                    dir?.safeDeleteRecursively()
                 }
             }
         }
 
-        logger.info { "Created file archives for ${provenancesWithMissingArchives.size} package(s) in $duration." }
-    }
-
-    private fun downloadRecursively(nestedProvenance: NestedProvenance): File {
-        // Use the provenanceDownloader to download each provenance from nestedProvenance separately, because they are
-        // likely already cached if a path scanner wrapper is used.
-
-        val root = provenanceDownloader.download(nestedProvenance.root)
-
-        nestedProvenance.subRepositories.forEach { (path, provenance) ->
-            val tempDir = provenanceDownloader.download(provenance)
-            val targetDir = root.resolve(path)
-            tempDir.toPath().moveTo(targetDir.toPath(), StandardCopyOption.ATOMIC_MOVE)
+        logger.info {
+            "Created file archives for ${provenancesWithMissingArchives.size} package(s) from " +
+                "${packagesByProvenance.size} provenance(s) in $duration."
         }
-
-        return root
     }
 }
 
@@ -653,16 +846,14 @@ fun ScanResult.toNestedProvenanceScanResult(nestedProvenance: NestedProvenance):
         findings.map { it.copy(location = it.location.copy(path = it.location.path.removePrefix(provenancePrefix))) }
     }
 
-    val provenances = nestedProvenance.getProvenances()
-    val scanResultsByProvenance = provenances.associateWith { provenance ->
-        // TODO: Find a solution for the incorrect packageVerificationCode and for how to associate issues to the
-        //       correct scan result.
+    val scanResultsByProvenance = nestedProvenance.allProvenances.associateWith { provenance ->
+        // TODO: Find a solution for how to associate issues to the correct scan result.
         listOf(
             copy(
                 provenance = provenance,
                 summary = summary.copy(
-                    licenseFindings = licenseFindingsByProvenance[provenance].orEmpty().toSortedSet(),
-                    copyrightFindings = copyrightFindingsByProvenance[provenance].orEmpty().toSortedSet()
+                    licenseFindings = licenseFindingsByProvenance[provenance].orEmpty().toSet(),
+                    copyrightFindings = copyrightFindingsByProvenance[provenance].orEmpty().toSet()
                 )
             )
         )
@@ -670,3 +861,105 @@ fun ScanResult.toNestedProvenanceScanResult(nestedProvenance: NestedProvenance):
 
     return NestedProvenanceScanResult(nestedProvenance, scanResultsByProvenance)
 }
+
+private fun ScanController.getSubRepositories(id: Identifier): Map<String, VcsInfo> {
+    val nestedProvenance = getNestedProvenance(id) ?: return emptyMap()
+
+    return nestedProvenance.subRepositories.entries.associate { (path, provenance) -> path to provenance.vcsInfo }
+}
+
+private fun ProvenanceResolutionResult.filterByVcsPath(): ProvenanceResolutionResult =
+    copy(
+        subRepositories = subRepositories.filter { (path, _) ->
+            File(path).startsWith(packageProvenance.vcsPath)
+        }
+    )
+
+private fun FileList.filterByVcsPaths(paths: Collection<String>): FileList =
+    if (paths.any { it.isBlank() }) {
+        this
+    } else {
+        copy(
+            files = files.filterTo(mutableSetOf()) { file ->
+                paths.any { filterPath ->
+                    file.path.startsWith("$filterPath/")
+                }
+            }
+        )
+    }
+
+internal fun ScannerRun.padNoneLicenseFindings(): ScannerRun {
+    val fileListByProvenance = files.associateBy { it.provenance }
+
+    val paddedScanResults = scanResults.mapTo(mutableSetOf()) { scanResult ->
+        val allPaths = fileListByProvenance[scanResult.provenance]?.files?.mapTo(mutableSetOf()) {
+            it.path
+        }.orEmpty()
+
+        scanResult.padNoneLicenseFindings(allPaths)
+    }
+
+    return copy(scanResults = paddedScanResults)
+}
+
+internal fun ScanResult.padNoneLicenseFindings(paths: Set<String>): ScanResult {
+    val pathsWithFindings = summary.licenseFindings.mapTo(mutableSetOf()) { it.location.path }
+    val pathsWithoutFindings = paths - pathsWithFindings
+
+    val findingsThatAreNone = pathsWithoutFindings.mapTo(mutableSetOf()) {
+        LicenseFinding(SpdxConstants.NONE, TextLocation(it, TextLocation.UNKNOWN_LINE))
+    }
+
+    return copy(
+        summary = summary.copy(
+            licenseFindings = summary.licenseFindings + findingsThatAreNone
+        )
+    )
+}
+
+/**
+ * Return a copy of this [ScanContext] with the entries which are not allowed for the given matcher removed. If a
+ * scanner has a non-null matcher, it may store scan results. In this case, entries which impact / modify the scan
+ * result would lead to undesired behavior.
+ */
+private fun ScanContext.clearPropertiesIfNeeded(matcher: ScannerMatcher?) =
+    if (matcher == null) {
+        this
+    } else {
+        copy(excludes = null, includes = null, snippetChoices = emptyList())
+    }
+
+private fun ScanController.getCheckoutPathsForProvenance(
+    projectDirRelativeToAnalysisRootForId: Map<Identifier, String>
+): Map<KnownProvenance, Set<String>> {
+    val result = mutableMapOf<KnownProvenance, MutableSet<String>>()
+
+    packages.forEach { pkg ->
+        val projectProvenance = getPackageProvenanceWithoutVcsPath(pkg.id) ?: return@forEach
+        val projectDirRelativeToAnalysisRoot = projectDirRelativeToAnalysisRootForId[pkg.id] ?: run {
+            logger.warn { "Could not determine project checkout path for {${pkg.id}." }
+            return@forEach
+        }
+
+        val provenanceCheckoutPath = projectDirRelativeToAnalysisRoot
+            .removeSuffix(pkg.vcsProcessed.path)
+            .ensureSuffix("/")
+
+        result.getOrPut(projectProvenance) { mutableSetOf() } += provenanceCheckoutPath
+
+        val projectNestedProvenance = getNestedProvenance(pkg.id) ?: return@forEach
+        projectNestedProvenance.subRepositories.forEach { (path, submoduleProvenance) ->
+            result.getOrPut(submoduleProvenance) { mutableSetOf() } += "$provenanceCheckoutPath$path"
+        }
+    }
+
+    return result
+}
+
+private fun ScanContext.setCheckoutPaths(
+    provenance: KnownProvenance,
+    checkoutPathsForProvenance: Map<KnownProvenance, Set<String>>
+): ScanContext =
+    copy(
+        checkoutPaths = checkoutPathsForProvenance[provenance].orEmpty().ifEmpty { setOf("") }
+    )

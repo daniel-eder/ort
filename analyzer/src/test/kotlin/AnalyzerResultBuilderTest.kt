@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,41 +19,62 @@
 
 package org.ossreviewtoolkit.analyzer
 
-import com.fasterxml.jackson.module.kotlin.readValue
-
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.WordSpec
+import io.kotest.inspectors.forAll
 import io.kotest.matchers.collections.beEmpty
+import io.kotest.matchers.collections.containExactly
 import io.kotest.matchers.collections.containExactlyInAnyOrder
+import io.kotest.matchers.collections.shouldBeSingle
+import io.kotest.matchers.collections.shouldBeSingleton
 import io.kotest.matchers.collections.shouldContainExactly
-import io.kotest.matchers.collections.shouldHaveSize
+import io.kotest.matchers.collections.shouldNotContain
+import io.kotest.matchers.maps.beEmpty as beEmptyMap
 import io.kotest.matchers.maps.containExactly
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.should
 import io.kotest.matchers.shouldBe
+import io.kotest.matchers.string.shouldStartWith
 import io.kotest.matchers.types.beTheSameInstanceAs
 
-import org.ossreviewtoolkit.analyzer.managers.utils.PackageManagerDependencyHandler
+import java.time.Instant
+
 import org.ossreviewtoolkit.model.AnalyzerResult
 import org.ossreviewtoolkit.model.DependencyGraph
 import org.ossreviewtoolkit.model.DependencyReference
+import org.ossreviewtoolkit.model.Hash
 import org.ossreviewtoolkit.model.Identifier
-import org.ossreviewtoolkit.model.OrtIssue
+import org.ossreviewtoolkit.model.Issue
 import org.ossreviewtoolkit.model.Package
 import org.ossreviewtoolkit.model.PackageLinkage
 import org.ossreviewtoolkit.model.PackageReference
 import org.ossreviewtoolkit.model.Project
 import org.ossreviewtoolkit.model.ProjectAnalyzerResult
+import org.ossreviewtoolkit.model.RemoteArtifact
 import org.ossreviewtoolkit.model.RootDependencyIndex
 import org.ossreviewtoolkit.model.Scope
+import org.ossreviewtoolkit.model.VcsInfo
+import org.ossreviewtoolkit.model.VcsType
+import org.ossreviewtoolkit.model.config.Excludes
+import org.ossreviewtoolkit.model.config.Includes
+import org.ossreviewtoolkit.model.config.ScopeExclude
+import org.ossreviewtoolkit.model.config.ScopeExcludeReason
+import org.ossreviewtoolkit.model.config.ScopeInclude
+import org.ossreviewtoolkit.model.config.ScopeIncludeReason
+import org.ossreviewtoolkit.model.fromYaml
+import org.ossreviewtoolkit.model.toYaml
 import org.ossreviewtoolkit.model.yamlMapper
-import org.ossreviewtoolkit.utils.test.shouldNotBeNull
+import org.ossreviewtoolkit.utils.ort.DeclaredLicenseProcessor
+import org.ossreviewtoolkit.utils.ort.ProcessedDeclaredLicense
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxOperator
+import org.ossreviewtoolkit.utils.spdxexpression.toSpdx
 
 class AnalyzerResultBuilderTest : WordSpec() {
-    private val issue1 = OrtIssue(source = "source-1", message = "message-1")
-    private val issue2 = OrtIssue(source = "source-2", message = "message-2")
-    private val issue3 = OrtIssue(source = "source-3", message = "message-3")
-    private val issue4 = OrtIssue(source = "source-4", message = "message-4")
-    private val issue5 = OrtIssue(source = "source-5", message = "message-5")
+    private val issue1 = Issue(timestamp = Instant.EPOCH, source = "source-1", message = "message-1")
+    private val issue2 = Issue(timestamp = Instant.EPOCH, source = "source-2", message = "message-2")
+    private val issue3 = Issue(timestamp = Instant.EPOCH, source = "source-3", message = "message-3")
+    private val issue4 = Issue(timestamp = Instant.EPOCH, source = "source-4", message = "message-4")
+    private val issue5 = Issue(timestamp = Instant.EPOCH, source = "source-5", message = "message-5")
 
     private val package1 = Package.EMPTY.copy(id = Identifier("type-1", "namespace-1", "package-1", "version-1"))
     private val package2 = Package.EMPTY.copy(id = Identifier("type-2", "namespace-2", "package-2", "version-2"))
@@ -61,24 +82,24 @@ class AnalyzerResultBuilderTest : WordSpec() {
 
     private val pkgRef1 = package1.toReference(issues = listOf(issue1))
     private val pkgRef2 = package2.toReference(
-        dependencies = sortedSetOf(package3.toReference(issues = listOf(issue2)))
+        dependencies = setOf(package3.toReference(issues = listOf(issue2)))
     )
 
-    private val scope1 = Scope("scope-1", sortedSetOf(pkgRef1))
-    private val scope2 = Scope("scope-2", sortedSetOf(pkgRef2))
+    private val scope1 = Scope("scope-1", setOf(pkgRef1))
+    private val scope2 = Scope("scope-2", setOf(pkgRef2))
 
     private val project1 = Project.EMPTY.copy(
         id = Identifier("type-1", "namespace-1", "project-1", "version-1"),
-        scopeDependencies = sortedSetOf(scope1),
+        scopeDependencies = setOf(scope1),
         definitionFilePath = "project1"
     )
     private val project2 = Project.EMPTY.copy(
         id = Identifier("type-2", "namespace-2", "project-2", "version-2"),
-        scopeDependencies = sortedSetOf(scope1, scope2)
+        scopeDependencies = setOf(scope1, scope2)
     )
     private val project3 = Project.EMPTY.copy(
         id = Identifier("type-1", "namespace-3", "project-1.2", "version-1"),
-        scopeNames = sortedSetOf("scope-2"),
+        scopeNames = setOf("scope-2"),
         scopeDependencies = null
     )
 
@@ -90,11 +111,11 @@ class AnalyzerResultBuilderTest : WordSpec() {
     private val depRef3 = DependencyReference(0, issues = listOf(issue5))
 
     private val scopeMapping1 = mapOf(
-        DependencyGraph.qualifyScope(project1, "scope-1") to listOf(RootDependencyIndex(0)),
-        DependencyGraph.qualifyScope(project3, "scope-2") to listOf(RootDependencyIndex(1))
+        DependencyGraph.qualifyScope(project1.id, "scope-1") to listOf(RootDependencyIndex(0)),
+        DependencyGraph.qualifyScope(project3.id, "scope-2") to listOf(RootDependencyIndex(1))
     )
     private val scopeMapping2 = mapOf(
-        DependencyGraph.qualifyScope(project2, "scope-3") to listOf(RootDependencyIndex(0))
+        DependencyGraph.qualifyScope(project2.id, "scope-3") to listOf(RootDependencyIndex(0))
     )
 
     private val graph1 =
@@ -111,10 +132,10 @@ class AnalyzerResultBuilderTest : WordSpec() {
         )
 
     private val analyzerResult1 = ProjectAnalyzerResult(
-        project1, sortedSetOf(package1), listOf(issue3, issue4)
+        project1, setOf(package1), listOf(issue3, issue4)
     )
     private val analyzerResult2 = ProjectAnalyzerResult(
-        project2, sortedSetOf(package1, package2, package3), listOf(issue4)
+        project2, setOf(package1, package2, package3), listOf(issue4)
     )
 
     init {
@@ -125,47 +146,42 @@ class AnalyzerResultBuilderTest : WordSpec() {
                     .addResult(analyzerResult2)
                     .build()
 
-                val serializedMergedResults = yamlMapper.writeValueAsString(mergedResults)
-                val deserializedMergedResults = yamlMapper.readValue<AnalyzerResult>(serializedMergedResults)
+                val serializedMergedResults = mergedResults.toYaml()
+                val deserializedMergedResults = serializedMergedResults.fromYaml<AnalyzerResult>()
 
                 deserializedMergedResults shouldBe mergedResults
             }
 
             "be serialized and deserialized correctly with a dependency graph" {
-                val p1 = project1.copy(scopeDependencies = null, scopeNames = sortedSetOf("scope1"))
-                val p2 = project2.copy(scopeDependencies = null, scopeNames = sortedSetOf("scope3"))
+                val p1 = project1.copy(scopeDependencies = null, scopeNames = setOf("scope1"))
+                val p2 = project2.copy(scopeDependencies = null, scopeNames = setOf("scope3"))
                 val result = AnalyzerResult(
-                    projects = sortedSetOf(p1, p2, project3),
-                    packages = sortedSetOf(),
-                    dependencyGraphs = sortedMapOf(
+                    projects = setOf(p1, p2, project3),
+                    packages = emptySet(),
+                    dependencyGraphs = mapOf(
                         project1.id.type to graph1,
                         project2.id.type to graph2
                     )
                 )
 
-                val serializedResult = yamlMapper.writeValueAsString(result)
-                val deserializedResult = yamlMapper.readValue<AnalyzerResult>(serializedResult)
+                val deserializedResult = result.toYaml().fromYaml<AnalyzerResult>()
 
                 deserializedResult shouldBe result
             }
 
             "not change its representation when serialized again" {
-                val p1 = project1.copy(scopeDependencies = null, scopeNames = sortedSetOf("scope1"))
-                val p2 = project2.copy(scopeDependencies = null, scopeNames = sortedSetOf("scope3"))
-                val result = AnalyzerResult(
-                    projects = sortedSetOf(p1, p2, project3),
-                    packages = sortedSetOf(),
-                    dependencyGraphs = sortedMapOf(
+                val p1 = project1.copy(scopeDependencies = null, scopeNames = setOf("scope1"))
+                val p2 = project2.copy(scopeDependencies = null, scopeNames = setOf("scope3"))
+                val serializedResult = AnalyzerResult(
+                    projects = setOf(p1, p2, project3),
+                    packages = emptySet(),
+                    dependencyGraphs = mapOf(
                         project1.id.type to graph1,
                         project2.id.type to graph2
                     )
-                )
+                ).toYaml()
 
-                val serializedResult = yamlMapper.writeValueAsString(result)
-                val deserializedResult = yamlMapper.readValue<AnalyzerResult>(serializedResult)
-                val serializedResult2 = yamlMapper.writeValueAsString(deserializedResult)
-
-                serializedResult2 shouldBe serializedResult
+                serializedResult.fromYaml<AnalyzerResult>().toYaml() shouldBe serializedResult
             }
 
             "use the dependency graph representation on serialization" {
@@ -174,37 +190,34 @@ class AnalyzerResultBuilderTest : WordSpec() {
                     .addResult(analyzerResult2)
                     .build()
 
-                val serializedMergedResults = yamlMapper.writeValueAsString(mergedResults)
+                val serializedMergedResults = mergedResults.toYaml()
                 val resultTree = yamlMapper.readTree(serializedMergedResults)
 
                 resultTree["dependency_graphs"] shouldNotBeNull {
                     count() shouldBe 2
                 }
-
-                resultTree["has_issues"].asBoolean() shouldBe true
             }
 
             "be serialized and deserialized correctly with an empty dependency graph" {
                 val emptyGraph = DependencyGraph(packages = emptyList(), scopes = emptyMap())
-                val p1 = project1.copy(scopeDependencies = null, scopeNames = sortedSetOf("scope1"))
-                val p2 = project2.copy(scopeDependencies = null, scopeNames = sortedSetOf("scope3"))
+                val p1 = project1.copy(scopeDependencies = null, scopeNames = setOf("scope1"))
+                val p2 = project2.copy(scopeDependencies = null, scopeNames = setOf("scope3"))
                 val result = AnalyzerResult(
-                    projects = sortedSetOf(p1, p2, project3),
-                    packages = sortedSetOf(),
-                    dependencyGraphs = sortedMapOf(
+                    projects = setOf(p1, p2, project3),
+                    packages = emptySet(),
+                    dependencyGraphs = mapOf(
                         project1.id.type to graph1,
                         project2.id.type to emptyGraph
                     )
                 )
 
-                val serializedResult = yamlMapper.writeValueAsString(result)
-                val deserializedResult = yamlMapper.readValue<AnalyzerResult>(serializedResult)
+                val deserializedResult = result.toYaml().fromYaml<AnalyzerResult>()
 
                 deserializedResult.withResolvedScopes() shouldBe result.withResolvedScopes()
             }
         }
 
-        "collectIssues" should {
+        "getAllIssues()" should {
             "find all issues" {
                 val analyzerResult = AnalyzerResultBuilder()
                     .addResult(analyzerResult1)
@@ -212,16 +225,16 @@ class AnalyzerResultBuilderTest : WordSpec() {
                     .addDependencyGraph("foo", graph2)
                     .build()
 
-                analyzerResult.collectIssues() should containExactly(
+                analyzerResult.getAllIssues() should containExactly(
                     package1.id to setOf(issue1),
-                    package3.id to setOf(issue2),
+                    package3.id to setOf(issue2, issue5),
                     project1.id to setOf(issue3, issue4),
                     project2.id to setOf(issue4)
                 )
             }
         }
 
-        "withResolvedScopes" should {
+        "withResolvedScopes()" should {
             "return the same instance if no shared dependency graphs are present" {
                 val analyzerResult = AnalyzerResultBuilder()
                     .addResult(analyzerResult1)
@@ -233,39 +246,39 @@ class AnalyzerResultBuilderTest : WordSpec() {
             }
 
             "resolve the dependency information in affected projects" {
-                val p1 = project1.copy(scopeDependencies = null, scopeNames = sortedSetOf("scope-1"))
-                val p2 = project2.copy(scopeDependencies = null, scopeNames = sortedSetOf("scope-3"))
+                val p1 = project1.copy(scopeDependencies = null, scopeNames = setOf("scope-1"))
+                val p2 = project2.copy(scopeDependencies = null, scopeNames = setOf("scope-3"))
                 val analyzerResult = AnalyzerResultBuilder()
-                    .addResult(ProjectAnalyzerResult(p1, sortedSetOf()))
+                    .addResult(ProjectAnalyzerResult(p1, emptySet()))
                     .addDependencyGraph(p1.id.type, graph1)
-                    .addResult(ProjectAnalyzerResult(project3, sortedSetOf()))
-                    .addResult(ProjectAnalyzerResult(p2, sortedSetOf()))
+                    .addResult(ProjectAnalyzerResult(project3, emptySet()))
+                    .addResult(ProjectAnalyzerResult(p2, emptySet()))
                     .addDependencyGraph(p2.id.type, graph2)
                     .build()
 
                 val resolvedResult = analyzerResult.withResolvedScopes()
 
-                resolvedResult.dependencyGraphs.isEmpty() shouldBe true
+                resolvedResult.dependencyGraphs should beEmptyMap()
 
                 resolvedResult.projects.find { it.id == p1.id } shouldNotBeNull {
-                    scopes shouldHaveSize 1
-                    scopes.first().name shouldBe "scope-1"
-                    scopes.first().dependencies shouldHaveSize 1
-                    scopes.first().dependencies.first().id shouldBe package1.id
+                    scopes shouldBeSingleton {
+                        it.name shouldBe "scope-1"
+                        it.dependencies.shouldBeSingle().id shouldBe package1.id
+                    }
                 }
 
                 resolvedResult.projects.find { it.id == project3.id } shouldNotBeNull {
-                    scopes shouldHaveSize 1
-                    scopes.first().name shouldBe "scope-2"
-                    scopes.first().dependencies shouldHaveSize 1
-                    scopes.first().dependencies.first().id shouldBe package2.id
+                    scopes shouldBeSingleton {
+                        it.name shouldBe "scope-2"
+                        it.dependencies.shouldBeSingle().id shouldBe package2.id
+                    }
                 }
 
                 resolvedResult.projects.find { it.id == p2.id } shouldNotBeNull {
-                    scopes shouldHaveSize 1
-                    scopes.first().name shouldBe "scope-3"
-                    scopes.first().dependencies shouldHaveSize 1
-                    scopes.first().dependencies.first().id shouldBe package3.id
+                    scopes shouldBeSingleton {
+                        it.name shouldBe "scope-3"
+                        it.dependencies.shouldBeSingle().id shouldBe package3.id
+                    }
                 }
             }
         }
@@ -277,13 +290,19 @@ class AnalyzerResultBuilderTest : WordSpec() {
                     .addResult(analyzerResult2)
                     .build()
 
-                mergedResults.projects shouldBe sortedSetOf(project1, project2)
-                mergedResults.packages shouldBe sortedSetOf(
-                    package1.toCuratedPackage(), package2.toCuratedPackage(),
-                    package3.toCuratedPackage()
+                mergedResults.withResolvedScopes().projects shouldBe setOf(
+                    project1,
+                    project2
                 )
-                mergedResults.issues shouldBe
-                        sortedMapOf(project1.id to analyzerResult1.issues, project2.id to analyzerResult2.issues)
+                mergedResults.packages shouldBe setOf(
+                    package1,
+                    package2,
+                    package3
+                )
+                mergedResults.issues shouldBe mapOf(
+                    project1.id to analyzerResult1.issues,
+                    project2.id to analyzerResult2.issues
+                )
             }
 
             "convert to the dependency graph representation when building" {
@@ -293,6 +312,138 @@ class AnalyzerResultBuilderTest : WordSpec() {
                     .build()
 
                 mergedResults.dependencyGraphs.keys should containExactlyInAnyOrder("type-1", "type-2")
+            }
+
+            "apply scope excludes" {
+                val scopeExclude = ScopeExclude("scope-2", ScopeExcludeReason.BUILD_DEPENDENCY_OF)
+                val excludes = Excludes(scopes = listOf(scopeExclude))
+
+                val mergedResults = AnalyzerResultBuilder()
+                    .addResult(analyzerResult1)
+                    .addResult(analyzerResult2)
+                    .build(excludes, Includes.EMPTY)
+
+                mergedResults.projects.forAll { project ->
+                    project.scopeNames.orEmpty() shouldNotContain "scope-2"
+                }
+            }
+
+            "apply scope includes" {
+                val scopeInclude = ScopeInclude("scope-1", ScopeIncludeReason.SOURCE_OF)
+                val includes = Includes(scopes = listOf(scopeInclude))
+
+                val mergedResults = AnalyzerResultBuilder()
+                    .addResult(analyzerResult1)
+                    .addResult(analyzerResult2)
+                    .build(Excludes.EMPTY, includes)
+
+                mergedResults.projects.forAll { project ->
+                    project.scopeNames?.single() shouldBe "scope-1"
+                }
+            }
+
+            "apply scope includes and excludes" {
+                val scopeInclude = ScopeInclude("scope-1", ScopeIncludeReason.SOURCE_OF)
+                val scopeExclude = ScopeExclude("scope-1", ScopeExcludeReason.DOCUMENTATION_DEPENDENCY_OF)
+                val includes = Includes(scopes = listOf(scopeInclude))
+                val excludes = Excludes(scopes = listOf(scopeExclude))
+
+                val mergedResults = AnalyzerResultBuilder()
+                    .addResult(analyzerResult1)
+                    .addResult(analyzerResult2)
+                    .build(excludes, includes)
+
+                mergedResults.projects.forAll { project ->
+                    project.scopeNames.orEmpty() shouldNotContain "scope-1"
+                    project.scopeNames.orEmpty() shouldNotContain "scope-2"
+                }
+            }
+
+            "merge same-id packages independently of arrival order" {
+                val unknownVcs = VcsInfo(VcsType.UNKNOWN, "https://example.com/repo.git", "abc123")
+                val gitVcs = unknownVcs.copy(type = VcsType.GIT)
+                val wheel = RemoteArtifact("https://example.com/package-1.0.whl", Hash.NONE)
+                val source = RemoteArtifact("https://example.com/package-1.0.tar.gz", Hash.NONE)
+                val packageWithWheel = package1.copy(
+                    vcs = unknownVcs,
+                    vcsProcessed = unknownVcs,
+                    binaryArtifact = wheel
+                )
+                val packageWithSource = package1.copy(
+                    vcs = gitVcs,
+                    vcsProcessed = gitVcs,
+                    sourceArtifact = source
+                )
+                val expected = package1.copy(
+                    vcs = gitVcs,
+                    vcsProcessed = gitVcs,
+                    binaryArtifact = wheel,
+                    sourceArtifact = source
+                )
+
+                val forward = AnalyzerResultBuilder()
+                    .addPackages(setOf(packageWithWheel))
+                    .addPackages(setOf(packageWithSource))
+                    .build()
+                    .packages
+                    .shouldBeSingle()
+                val reverse = AnalyzerResultBuilder()
+                    .addPackages(setOf(packageWithSource))
+                    .addPackages(setOf(packageWithWheel))
+                    .build()
+                    .packages
+                    .shouldBeSingle()
+
+                forward shouldBe expected
+                reverse shouldBe expected
+            }
+
+            "preserve declared license processing for a unique package" {
+                val declaredLicenses = setOf("Apache-2.0", "MIT")
+                val packageWithOrLicenses = package1.copy(
+                    declaredLicenses = declaredLicenses,
+                    declaredLicensesProcessed = DeclaredLicenseProcessor.process(
+                        declaredLicenses,
+                        operator = SpdxOperator.OR
+                    )
+                )
+
+                AnalyzerResultBuilder()
+                    .addPackages(setOf(packageWithOrLicenses))
+                    .build()
+                    .packages.shouldContainExactly(packageWithOrLicenses)
+            }
+
+            "fail for conflicting same-id package metadata" {
+                val exception = shouldThrow<IllegalArgumentException> {
+                    AnalyzerResultBuilder()
+                        .addPackages(setOf(package1.copy(description = "description-a")))
+                        .addPackages(setOf(package1.copy(description = "description-b")))
+                        .build()
+                }
+
+                exception.message shouldStartWith
+                    "Unable to create the AnalyzerResult as it contains projects and / or packages with the same ids:"
+            }
+
+            "fail for conflicting same-id binary artifacts" {
+                val exception = shouldThrow<IllegalArgumentException> {
+                    AnalyzerResultBuilder()
+                        .addPackages(
+                            setOf(
+                                package1.copy(binaryArtifact = RemoteArtifact("https://example.com/a.whl", Hash.NONE))
+                            )
+                        )
+                        .addPackages(
+                            setOf(
+                                package1.copy(binaryArtifact = RemoteArtifact("https://example.com/b.whl", Hash.NONE))
+                            )
+                        )
+                        .build()
+                }
+
+                exception.message shouldStartWith
+                    "Unable to create the AnalyzerResult as it contains projects and / or packages with the same ids:"
             }
 
             "throw if a result contains a project and a package with the same ID" {
@@ -307,33 +458,33 @@ class AnalyzerResultBuilderTest : WordSpec() {
             }
 
             "resolve package manager dependencies" {
-                val packageManagerDependency = PackageManagerDependencyHandler.createPackageManagerDependency(
+                val packageManagerDependency = PackageManagerDependency(
                     packageManager = project1.id.type,
                     definitionFile = project1.definitionFilePath,
                     scope = scope1.name,
                     linkage = PackageLinkage.PROJECT_DYNAMIC
-                )
+                ).toPackageReference()
 
                 val scope = Scope(
                     name = "scope",
-                    dependencies = sortedSetOf(
+                    dependencies = setOf(
                         packageManagerDependency,
                         PackageReference(
-                            id = pkgRef1.id,
-                            dependencies = sortedSetOf(packageManagerDependency)
+                            id = package1.id,
+                            dependencies = setOf(packageManagerDependency)
                         )
                     )
                 )
 
                 val project = Project.EMPTY.copy(
-                    id = Identifier("type", "namespace", "project", "version"),
-                    scopeDependencies = sortedSetOf(scope),
-                    definitionFilePath = "project"
+                    id = project2.id,
+                    scopeDependencies = setOf(scope),
+                    definitionFilePath = project2.definitionFilePath
                 )
 
                 val projectAnalyzerResult = ProjectAnalyzerResult(
                     project = project,
-                    packages = sortedSetOf(package1)
+                    packages = setOf(package1)
                 )
 
                 val analyzerResult = AnalyzerResultBuilder().run {
@@ -344,24 +495,22 @@ class AnalyzerResultBuilderTest : WordSpec() {
 
                 analyzerResult.withResolvedScopes().apply {
                     projects.find { it.id == project.id } shouldNotBeNull {
-                        project.scopes shouldContainExactly sortedSetOf(
+                        scopes should containExactlyInAnyOrder(
                             Scope(
                                 name = "scope",
-                                dependencies = sortedSetOf(
+                                dependencies = setOf(
                                     PackageReference(
                                         id = project1.id,
-                                        dependencies = sortedSetOf(
-                                            PackageReference(id = package1.id)
-                                        )
+                                        linkage = PackageLinkage.PROJECT_DYNAMIC,
+                                        dependencies = setOf(pkgRef1)
                                     ),
                                     PackageReference(
                                         id = package1.id,
-                                        dependencies = sortedSetOf(
+                                        dependencies = setOf(
                                             PackageReference(
                                                 id = project1.id,
-                                                dependencies = sortedSetOf(
-                                                    PackageReference(id = package1.id)
-                                                )
+                                                linkage = PackageLinkage.PROJECT_DYNAMIC,
+                                                dependencies = setOf(pkgRef1)
                                             )
                                         )
                                     )
@@ -377,6 +526,97 @@ class AnalyzerResultBuilderTest : WordSpec() {
 
                 emptyResult.projects should beEmpty()
                 emptyResult.packages should beEmpty()
+            }
+        }
+
+        "mergeSameWithDistinctValues()" should {
+            "merge VCS properties and labels" {
+                val declaredLicenses = setOf("MIT")
+                val common = Package.EMPTY.copy(
+                    id = Identifier("Crate::zxcvbn:3.1.1"),
+                    purl = "pkg:cargo/zxcvbn@3.1.1",
+                    authors = setOf("Josh Holmer"),
+                    declaredLicenses = declaredLicenses,
+                    declaredLicensesProcessed = DeclaredLicenseProcessor.process(declaredLicenses),
+                    description = "An entropy-based password strength estimator, originally for Javascript by Dropbox.",
+                    homepageUrl = "https://github.com/shssoichiro/zxcvbn-rs"
+                )
+
+                val withSourceArtifactAndVcsInfo = common.copy(
+                    sourceArtifact = RemoteArtifact(
+                        url = "https://crates.io/api/v1/crates/zxcvbn/3.1.1/download",
+                        hash = Hash(
+                            value = "f9eaee90f4a795d1eb4ba6c51e1c1721d4784d550e8efa7b2600f29c867365e0",
+                            algorithm = "SHA-256"
+                        )
+                    ),
+                    vcs = VcsInfo(
+                        type = VcsType.GIT,
+                        url = "https://github.com/shssoichiro/zxcvbn-rs.git",
+                        revision = ""
+                    ),
+                    vcsProcessed = VcsInfo(
+                        type = VcsType.GIT,
+                        url = "https://github.com/shssoichiro/zxcvbn-rs.git",
+                        revision = ""
+                    ),
+                    labels = mapOf(
+                        "same" to "same",
+                        "source" to "different"
+                    )
+                )
+
+                val withVcsInfoOnly = common.copy(
+                    vcs = VcsInfo(
+                        type = VcsType.GIT,
+                        url = "git+https://github.com/shssoichiro/zxcvbn-rs.git",
+                        revision = "4e8e784b23541d118800df84feedf8160879d1af"
+                    ),
+                    vcsProcessed = VcsInfo(
+                        type = VcsType.GIT,
+                        url = "https://github.com/shssoichiro/zxcvbn-rs.git",
+                        revision = "4e8e784b23541d118800df84feedf8160879d1af"
+                    ),
+                    labels = mapOf(
+                        "same" to "same",
+                        "vcs" to "different"
+                    )
+                )
+
+                val result = setOf(withSourceArtifactAndVcsInfo, withVcsInfoOnly).mergeSameWithDistinctValues()
+
+                result should containExactly(
+                    Package(
+                        id = Identifier("Crate::zxcvbn:3.1.1"),
+                        purl = "pkg:cargo/zxcvbn@3.1.1",
+                        authors = setOf("Josh Holmer"),
+                        declaredLicenses = setOf("MIT"),
+                        declaredLicensesProcessed = ProcessedDeclaredLicense(
+                            spdxExpression = "MIT".toSpdx()
+                        ),
+                        description = "An entropy-based password strength estimator, originally for Javascript by " +
+                            "Dropbox.",
+                        homepageUrl = "https://github.com/shssoichiro/zxcvbn-rs",
+                        binaryArtifact = RemoteArtifact.EMPTY,
+                        sourceArtifact = RemoteArtifact(
+                            url = "https://crates.io/api/v1/crates/zxcvbn/3.1.1/download",
+                            hash = Hash(
+                                value = "f9eaee90f4a795d1eb4ba6c51e1c1721d4784d550e8efa7b2600f29c867365e0",
+                                algorithm = "SHA-256"
+                            )
+                        ),
+                        vcs = VcsInfo(
+                            type = VcsType.GIT,
+                            url = "https://github.com/shssoichiro/zxcvbn-rs.git",
+                            revision = "4e8e784b23541d118800df84feedf8160879d1af"
+                        ),
+                        labels = mapOf(
+                            "same" to "same",
+                            "source" to "different",
+                            "vcs" to "different"
+                        )
+                    )
+                )
             }
         }
     }

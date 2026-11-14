@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2022 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,35 +19,33 @@
 
 package org.ossreviewtoolkit.model.config
 
-import com.fasterxml.jackson.module.kotlin.readValue
-
 import io.kotest.core.spec.style.WordSpec
-import io.kotest.matchers.nulls.beNull
+import io.kotest.matchers.maps.beEmpty
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.should
 
 import java.io.File
 
-import org.ossreviewtoolkit.model.yamlMapper
+import org.ossreviewtoolkit.model.fromYaml
+import org.ossreviewtoolkit.model.toYaml
+import org.ossreviewtoolkit.utils.ort.ORT_REFERENCE_CONFIG_FILENAME
 
 class ReporterConfigurationTest : WordSpec({
-    "Generic reporter options" should {
-        "not be serialized as they might contain sensitive information" {
-            rereadReporterConfig(loadReporterConfig()).options should beNull()
+    "Reporter secrets" should {
+        "not be serialized as they contain sensitive information" {
+            rereadReporterConfig(loadReporterConfig()).reporters?.get("FossId") shouldNotBeNull {
+                secrets should beEmpty()
+            }
         }
     }
 })
 
-/**
- * Load the ORT reference configuration and extract the reporter configuration.
- */
+/** Load the ORT reference configuration and extract the reporter configuration. */
 private fun loadReporterConfig(): ReporterConfiguration =
-    OrtConfiguration.load(file = File("src/main/resources/$REFERENCE_CONFIG_FILENAME")).reporter
+    OrtConfiguration.load(file = File("src/main/resources/$ORT_REFERENCE_CONFIG_FILENAME")).reporter
 
 /**
  * Perform a serialization round-trip of the given reporter [config] and return the result. This is used to check
  * whether serialization and deserialization of reporter configurations work as expected.
  */
-private fun rereadReporterConfig(config: ReporterConfiguration): ReporterConfiguration {
-    val yaml = yamlMapper.writeValueAsString(config)
-    return yamlMapper.readValue(yaml)
-}
+private fun rereadReporterConfig(config: ReporterConfiguration): ReporterConfiguration = config.toYaml().fromYaml()

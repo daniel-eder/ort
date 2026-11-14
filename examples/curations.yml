@@ -24,7 +24,7 @@
 #      url: "http://example.com/repo.git"
 #      revision: "1234abc"
 #      path: "subdirectory"
-#    is_meta_data_only: true # Whether the package is metadata only.
+#    is_metadata_only: true # Whether the package is metadata only.
 #    is_modified: true # Whether the package is modified compared to the original source.
 
 - id: "Maven:asm:asm" # No version means the curation will be applied to all versions of the package.
@@ -57,7 +57,7 @@
 - id: "Maven:org.jetbrains.kotlin:kotlin-bom"
   curations:
     comment: "The package is a Maven BOM file and thus is metadata only."
-    is_meta_data_only: true
+    is_metadata_only: true
 
 - id: "PyPI::pyramid-workflow:1.0.0"
   curations:
@@ -70,3 +70,20 @@
     comment: "A copyright statement was used to declare the license."
     declared_license_mapping:
       "Copyright (C) 2013, Martin Journois": "NONE"
+
+- id: "Maven:androidx.collection:collection:"
+  curations:
+    comment: "Scan the source artifact, because the VCS revision and path are hard to figure out."
+    source_code_origins: [ARTIFACT]
+
+- id: "Maven:androidx.collection:collection:"
+  curations:
+    comment: "Specify the platform for use within policy rules."
+    labels:
+      platform: "android"
+
+- id: "NPM:@types:mime-types:2.1.0"
+  curations:
+    comment: "Retrieve the vulnerabilities from Black Duck by the provided origin-id instead of by the purl."
+    labels:
+      black-duck:origin-id: "npmjs:@types/mime-types/2.1.0"

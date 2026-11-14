@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,19 +23,13 @@ import com.fasterxml.jackson.annotation.JsonInclude
 
 import org.ossreviewtoolkit.model.PackageCuration
 
-/**
- * Curations for artifacts in a repository.
- */
+/** Curations for artifacts in a repository. */
 data class Curations(
-    /**
-     * Curations for third-party packages.
-     */
+    /** Curations for third-party packages. */
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
     val packages: List<PackageCuration> = emptyList(),
 
-    /**
-     * Curations for license findings.
-     */
+    /** Curations for license findings. */
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
     val licenseFindings: List<LicenseFindingCuration> = emptyList()
 )

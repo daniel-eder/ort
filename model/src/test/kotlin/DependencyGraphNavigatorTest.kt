@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,9 +25,8 @@ import io.kotest.matchers.types.shouldBeTypeOf
 import org.ossreviewtoolkit.utils.test.readOrtResult
 
 class DependencyGraphNavigatorTest : AbstractDependencyNavigatorTest() {
-    override val resultFileName = "src/test/assets/sbt-multi-project-example-graph.yml"
-
-    override val resultWithIssuesFileName = "src/test/assets/result-with-issues-graph.yml"
+    override val resultFileName = "/sbt-multi-project-example-graph.yml"
+    override val resultWithIssuesFileName = "/result-with-issues-graph.yml"
 
     init {
         "init" should {

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2022 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,14 +22,16 @@ package org.ossreviewtoolkit.model
 import io.kotest.core.spec.style.WordSpec
 import io.kotest.matchers.shouldBe
 
-import org.ossreviewtoolkit.utils.spdx.toSpdx
+import java.time.Instant
+
+import org.ossreviewtoolkit.utils.spdxexpression.toSpdx
 
 class PackageCurationDataTest : WordSpec({
     val original = PackageCurationData(
         comment = "original",
         purl = "original",
         cpe = "original",
-        authors = sortedSetOf("original"),
+        authors = setOf("original"),
         concludedLicense = "original".toSpdx(),
         description = "original",
         homepageUrl = "original",
@@ -41,6 +43,7 @@ class PackageCurationDataTest : WordSpec({
             url = "original",
             hash = Hash.create("original")
         ),
+        publishedAt = Instant.EPOCH,
         vcs = VcsInfoCurationData(
             type = VcsType.GIT,
             url = "original",
@@ -49,14 +52,19 @@ class PackageCurationDataTest : WordSpec({
         ),
         isMetadataOnly = true,
         isModified = true,
-        declaredLicenseMapping = mapOf("original" to "original".toSpdx())
+        declaredLicenseMapping = mapOf("original" to "LicenseRef-original".toSpdx()),
+        sourceCodeOrigins = listOf(SourceCodeOrigin.ARTIFACT, SourceCodeOrigin.VCS),
+        labels = mapOf(
+            "k1" to "v1-original",
+            "k2" to "v2-original"
+        )
     )
 
     val other = PackageCurationData(
         comment = "other",
         purl = "other",
         cpe = "other",
-        authors = sortedSetOf("other"),
+        authors = setOf("other"),
         concludedLicense = "other".toSpdx(),
         description = "other",
         homepageUrl = "other",
@@ -68,6 +76,7 @@ class PackageCurationDataTest : WordSpec({
             url = "other",
             hash = Hash.create("other")
         ),
+        publishedAt = Instant.EPOCH,
         vcs = VcsInfoCurationData(
             type = VcsType.SUBVERSION,
             url = "other",
@@ -76,7 +85,12 @@ class PackageCurationDataTest : WordSpec({
         ),
         isMetadataOnly = false,
         isModified = false,
-        declaredLicenseMapping = mapOf("other" to "other".toSpdx())
+        declaredLicenseMapping = mapOf("other" to "LicenseRef-other".toSpdx()),
+        sourceCodeOrigins = listOf(SourceCodeOrigin.VCS),
+        labels = mapOf(
+            "k2" to "v2-other",
+            "k3" to "v3-other"
+        )
     )
 
     "Merging" should {
@@ -92,7 +106,9 @@ class PackageCurationDataTest : WordSpec({
                 binaryArtifact = null,
                 vcs = null,
                 isMetadataOnly = null,
-                declaredLicenseMapping = emptyMap()
+                declaredLicenseMapping = emptyMap(),
+                sourceCodeOrigins = null,
+                labels = emptyMap()
             )
 
             originalWithSomeUnsetData.merge(other) shouldBe originalWithSomeUnsetData.copy(
@@ -102,18 +118,25 @@ class PackageCurationDataTest : WordSpec({
                 binaryArtifact = other.binaryArtifact,
                 vcs = other.vcs,
                 isMetadataOnly = other.isMetadataOnly,
-                declaredLicenseMapping = other.declaredLicenseMapping
+                declaredLicenseMapping = other.declaredLicenseMapping,
+                sourceCodeOrigins = other.sourceCodeOrigins,
+                labels = other.labels
             )
         }
 
         "keep existing original data" {
             original.merge(other) shouldBe original.copy(
                 comment = "original\nother",
-                authors = sortedSetOf("original", "other"),
+                authors = setOf("original", "other"),
                 concludedLicense = "original AND other".toSpdx(),
                 declaredLicenseMapping = mapOf(
-                    "original" to "original".toSpdx(),
-                    "other" to "other".toSpdx()
+                    "original" to "LicenseRef-original".toSpdx(),
+                    "other" to "LicenseRef-other".toSpdx()
+                ),
+                labels = mapOf(
+                    "k1" to "v1-original",
+                    "k2" to "v2-other",
+                    "k3" to "v3-other"
                 )
             )
         }
@@ -123,7 +146,9 @@ class PackageCurationDataTest : WordSpec({
                 comment = original.comment,
                 authors = original.authors,
                 concludedLicense = original.concludedLicense,
-                declaredLicenseMapping = original.declaredLicenseMapping
+                declaredLicenseMapping = original.declaredLicenseMapping,
+                sourceCodeOrigins = original.sourceCodeOrigins,
+                labels = original.labels
             )
 
             val mergedData = original.merge(otherWithSomeOriginalData)

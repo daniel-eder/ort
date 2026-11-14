@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,27 +26,26 @@ import java.util.concurrent.ConcurrentHashMap
 
 import javax.sql.DataSource
 
-import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
-import org.apache.logging.log4j.kotlin.Logging
+import org.apache.logging.log4j.kotlin.logger
 
-import org.jetbrains.exposed.sql.Database
-import org.jetbrains.exposed.sql.Transaction
-import org.jetbrains.exposed.sql.transactions.experimental.suspendedTransactionAsync
-import org.jetbrains.exposed.sql.transactions.transaction
+import org.jetbrains.exposed.v1.core.Transaction
+import org.jetbrains.exposed.v1.jdbc.Database
+import org.jetbrains.exposed.v1.jdbc.JdbcTransaction
+import org.jetbrains.exposed.v1.jdbc.transactions.suspendTransaction
+import org.jetbrains.exposed.v1.jdbc.transactions.transaction
+import org.jetbrains.exposed.v1.jdbc.vendors.currentDialectMetadata
 
 import org.ossreviewtoolkit.model.config.PostgresConnection
 import org.ossreviewtoolkit.utils.ort.ORT_FULL_NAME
 
-object DatabaseUtils : Logging {
-    /**
-     * This map holds the [HikariDataSource] based on the [PostgresConnection].
-     */
+object DatabaseUtils {
+    /** This map holds the [HikariDataSource] based on the [PostgresConnection]. */
     private val dataSources = ConcurrentHashMap<PostgresConnection, Lazy<DataSource>>()
 
-    /**
-     * Return a [HikariDataSource] for the given [PostgresConnection].
-     */
+    /** Return a [HikariDataSource] for the given [PostgresConnection]. */
     fun createHikariDataSource(
         config: PostgresConnection,
         applicationNameSuffix: String = "",
@@ -76,6 +75,13 @@ object DatabaseUtils : Logging {
                 schema = config.schema
                 maximumPoolSize = maxPoolSize
 
+                config.connectionTimeout?.also { connectionTimeout = it }
+                config.idleTimeout?.also { idleTimeout = it }
+                config.keepaliveTime?.also { keepaliveTime = it }
+                config.maxLifetime?.also { maxLifetime = it }
+                config.maximumPoolSize?.also { maximumPoolSize = it }
+                config.minimumIdle?.also { minimumIdle = it }
+
                 val suffix = " - $applicationNameSuffix".takeIf { applicationNameSuffix.isNotEmpty() }.orEmpty()
                 addDataSourceProperty("ApplicationName", "$ORT_FULL_NAME$suffix")
 
@@ -92,10 +98,8 @@ object DatabaseUtils : Logging {
         }
     }
 
-    /**
-     * Logs a warning in case the actual database encoding does not equal the [expectedEncoding].
-     */
-    fun Transaction.checkDatabaseEncoding(expectedEncoding: String = "UTF8") =
+    /** Logs a warning in case the actual database encoding does not equal the [expectedEncoding]. */
+    fun JdbcTransaction.checkDatabaseEncoding(expectedEncoding: String = "UTF8") =
         execShow("SHOW client_encoding") { resultSet ->
             if (resultSet.next()) {
                 val clientEncoding = resultSet.getString(1)
@@ -107,23 +111,18 @@ object DatabaseUtils : Logging {
             }
         }
 
-    /**
-     * Return true if and only if a table named [tableName] exists.
-     */
+    /** Return true if a table named [tableName] exists. */
     fun Transaction.tableExists(tableName: String): Boolean =
-        tableName in db.dialect.allTablesNames().map { it.substringAfterLast(".") }
+        tableName in currentDialectMetadata.allTablesNames().map { it.substringAfterLast(".") }
 
-    /**
-     * Start a new transaction to execute the given [statement] on this [Database].
-     */
-    fun <T> Database.transaction(statement: Transaction.() -> T): T =
-        transaction(this, statement)
+    /** Start a new transaction to execute the given [statement] on this [Database]. */
+    fun <T> Database.transaction(statement: JdbcTransaction.() -> T): T = transaction(db = this, statement = statement)
 
-    /**
-     * Start a new asynchronous transaction to execute the given [statement] on this [Database].
-     */
-    suspend fun <T> Database.transactionAsync(statement: suspend Transaction.() -> T): Deferred<T> =
-        suspendedTransactionAsync(db = this, statement = statement)
+    /** Start a new suspending transaction to execute the given [statement] on this [Database]. */
+    suspend fun <T> Database.suspendTransaction(statement: JdbcTransaction.() -> T): T =
+        withContext(Dispatchers.IO) {
+            suspendTransaction(db = this@suspendTransaction, statement = statement)
+        }
 
     /**
      * Add a property with the given [key] and [value] to the [HikariConfig]. If the [value] is *null*, this

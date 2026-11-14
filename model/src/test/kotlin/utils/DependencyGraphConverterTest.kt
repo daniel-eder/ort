@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,38 +19,40 @@
 
 package org.ossreviewtoolkit.model.utils
 
-import io.kotest.assertions.fail
+import io.kotest.assertions.AssertionErrorBuilder
 import io.kotest.core.spec.style.WordSpec
+import io.kotest.inspectors.forAll
 import io.kotest.matchers.collections.beEmpty
 import io.kotest.matchers.collections.containExactlyInAnyOrder
-import io.kotest.matchers.nulls.beNull
+import io.kotest.matchers.collections.containOnly
+import io.kotest.matchers.ints.shouldBeLessThan
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.should
-import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNot
 import io.kotest.matchers.types.beTheSameInstanceAs
 
-import java.io.File
-import java.util.SortedSet
-
 import org.ossreviewtoolkit.model.AnalyzerResult
-import org.ossreviewtoolkit.model.CuratedPackage
 import org.ossreviewtoolkit.model.DependencyGraphNode
 import org.ossreviewtoolkit.model.Identifier
-import org.ossreviewtoolkit.model.OrtIssue
+import org.ossreviewtoolkit.model.Issue
 import org.ossreviewtoolkit.model.OrtResult
 import org.ossreviewtoolkit.model.Package
 import org.ossreviewtoolkit.model.PackageReference
 import org.ossreviewtoolkit.model.Project
 import org.ossreviewtoolkit.model.ProjectAnalyzerResult
 import org.ossreviewtoolkit.model.Scope
-import org.ossreviewtoolkit.model.readValue
-import org.ossreviewtoolkit.utils.test.shouldNotBeNull
+import org.ossreviewtoolkit.model.config.Excludes
+import org.ossreviewtoolkit.model.config.Includes
+import org.ossreviewtoolkit.model.config.ScopeExclude
+import org.ossreviewtoolkit.model.config.ScopeExcludeReason
+import org.ossreviewtoolkit.model.config.ScopeInclude
+import org.ossreviewtoolkit.model.config.ScopeIncludeReason
+import org.ossreviewtoolkit.utils.test.readResourceValue
 
 class DependencyGraphConverterTest : WordSpec({
     "convertToDependencyGraphs" should {
         "return the same result if no conversion is required" {
-            val resultFile = File("../model/src/test/assets/analyzer-result-with-dependency-graph.yml")
-            val ortResult = resultFile.readValue<OrtResult>()
+            val ortResult = readResourceValue<OrtResult>("/analyzer-result-with-dependency-graph.yml")
             val analyzerResult = ortResult.analyzer?.result
 
             analyzerResult shouldNotBeNull {
@@ -60,27 +62,52 @@ class DependencyGraphConverterTest : WordSpec({
             }
         }
 
-        "convert a result to the dependency graph format" {
-            val mavenProject1 = createProject("Maven", index = 1)
-            val mavenProject2 = createProject("Maven", index = 2)
-            val goProject = createProject("GoMod", index = 3)
+        "exclude scopes" {
+            val project = createProject("Maven", index = 1)
 
-            val result = createAnalyzerResult(
-                mavenProject1.createResult(),
-                mavenProject2.createResult(),
-                goProject.createResult()
+            val result = createAnalyzerResult(project.createResult())
+
+            val scopeExclude = ScopeExclude("test", ScopeExcludeReason.TEST_DEPENDENCY_OF)
+            val excludes = Excludes(scopes = listOf(scopeExclude))
+
+            val convertedResult = DependencyGraphConverter.convert(result, excludes, Includes.EMPTY)
+
+            convertedResult.projects.single().scopeNames should containOnly("main")
+            convertedResult.packages.forAll { it.id.version.drop(2).toInt() shouldBeLessThan 110 }
+        }
+
+        "exclude scopes due to scopes includes" {
+            val project = createProject("Maven", index = 1)
+
+            val result = createAnalyzerResult(project.createResult())
+
+            val scopeInclude = ScopeInclude("main", ScopeIncludeReason.SOURCE_OF)
+            val includes = Includes(scopes = listOf(scopeInclude))
+
+            val convertedResult = DependencyGraphConverter.convert(result, Excludes.EMPTY, includes)
+
+            convertedResult.projects.single().scopeNames should containOnly("main")
+            convertedResult.packages.forAll { it.id.version.drop(2).toInt() shouldBeLessThan 110 }
+        }
+
+        "correctly exclude scopes if there are projects using a dependency graph" {
+            val ortResult = readResourceValue<OrtResult>("/analyzer-result-with-dependency-graph.yml")
+            val graphAnalyzerResult = ortResult.analyzer?.result!!
+
+            val project = createProject("Go", index = 1)
+            val projectAnalyzerResult = project.createResult()
+
+            val analyzerResult = graphAnalyzerResult.copy(
+                projects = graphAnalyzerResult.projects + project,
+                packages = graphAnalyzerResult.packages + projectAnalyzerResult.packages
             )
+            val scopeExclude = ScopeExclude("main", ScopeExcludeReason.TEST_DEPENDENCY_OF)
+            val excludes = Excludes(scopes = listOf(scopeExclude))
 
-            val convertedResult = DependencyGraphConverter.convert(result)
+            val convertedResult = DependencyGraphConverter.convert(analyzerResult, excludes, Includes.EMPTY)
 
-            convertedResult.dependencyGraphs.keys should containExactlyInAnyOrder("Maven", "GoMod")
-            convertedResult.projects.forEach {
-                it.scopeDependencies should beNull()
-                it.scopeNames shouldNot beNull()
-            }
-
-            convertedResult.withResolvedScopes() shouldBe result
-            convertedResult.packages should beTheSameInstanceAs(result.packages)
+            val allPackagesTypes = convertedResult.packages.mapTo(mutableSetOf()) { it.id.type }
+            allPackagesTypes should containExactlyInAnyOrder("Maven", "Go")
         }
 
         "convert a result with a partial dependency graph" {
@@ -91,10 +118,11 @@ class DependencyGraphConverterTest : WordSpec({
             val orgResult = createAnalyzerResult(gradleProject.createResult())
             val resultWithGraph = DependencyGraphConverter.convert(orgResult)
             val mixedResult = resultWithGraph.copy(
-                projects = sortedSetOf(
-                    goProject1,
-                    goProject2
-                ).apply { addAll(resultWithGraph.projects) }
+                projects = buildSet {
+                    add(goProject1)
+                    add(goProject2)
+                    addAll(resultWithGraph.projects)
+                }
             )
 
             val convertedResult = DependencyGraphConverter.convert(mixedResult)
@@ -113,50 +141,48 @@ class DependencyGraphConverterTest : WordSpec({
             val convertedResult = DependencyGraphConverter.convert(result)
 
             val graph = convertedResult.dependencyGraphs.getValue("Maven")
-            val issues = mutableListOf<OrtIssue>()
+            val issues = mutableListOf<Issue>()
 
             fun collectIssues(node: DependencyGraphNode) {
                 issues += node.issues
                 graph.dependencies[node]?.forEach(::collectIssues)
             }
 
-            graph.nodes?.forEach(::collectIssues)
+            graph.nodes.forEach(::collectIssues)
             issues shouldNot beEmpty()
         }
 
         "not override a dependency graph for an empty project" {
             val gradleProject = createProject("Gradle", index = 1)
-            val gradleEmptyProject = createProject("Gradle", index = 2).copy(scopeDependencies = sortedSetOf())
+            val gradleEmptyProject = createProject("Gradle", index = 2).copy(scopeDependencies = emptySet())
 
             val orgResult = createAnalyzerResult(gradleProject.createResult())
             val resultWithGraph = DependencyGraphConverter.convert(orgResult)
             val mixedResult = resultWithGraph.copy(
-                projects = sortedSetOf(gradleEmptyProject).apply { addAll(resultWithGraph.projects) }
+                projects = buildSet {
+                    add(gradleEmptyProject)
+                    addAll(resultWithGraph.projects)
+                }
             )
 
             val convertedResult = DependencyGraphConverter.convert(mixedResult)
 
             convertedResult.dependencyGraphs["Gradle"] shouldNotBeNull {
-                nodes shouldNotBeNull {
-                    this shouldNot beEmpty()
-                }
-
+                nodes shouldNot beEmpty()
                 scopes.keys shouldNot beEmpty()
             }
         }
     }
 })
 
-/**
- * Create a test project with a (small) dependency tree. Use [managerName] and [index] to generate identifiers.
- */
+/** Create a test project with a (small) dependency tree. Use [managerName] and [index] to generate identifiers. */
 private fun createProject(managerName: String, index: Int): Project {
     val mainScope = Scope("main", createDependencies(managerName, index * 100, 4))
     val testScope = Scope("test", createDependencies(managerName, index * 100 + 10, 8))
 
     return Project.EMPTY.copy(
         id = createIdentifier(managerName, index, forProject = true),
-        scopeDependencies = sortedSetOf(mainScope, testScope)
+        scopeDependencies = setOf(mainScope, testScope)
     )
 }
 
@@ -176,44 +202,36 @@ private fun createIdentifier(managerName: String, index: Int, forProject: Boolea
  * Create a set of [PackageReference]s with the size of [count] simulating the dependencies of a project. Use
  * [managerName], [startIndex] to generate identifiers.
  */
-private fun createDependencies(managerName: String, startIndex: Int, count: Int): SortedSet<PackageReference> =
-    (startIndex..(startIndex + count)).mapTo(sortedSetOf()) { index ->
+private fun createDependencies(managerName: String, startIndex: Int, count: Int): Set<PackageReference> =
+    (startIndex..(startIndex + count)).mapTo(mutableSetOf()) { index ->
         PackageReference(createIdentifier(managerName, index, forProject = false), issues = createIssues(index))
     }
 
-/**
- * Create a list with issues for a test dependency based on its [index].
- */
-private fun createIssues(index: Int): List<OrtIssue> =
-    emptyList<OrtIssue>().takeIf { index % 2 == 0 } ?: listOf(
-        OrtIssue(source = "test", message = "Test issue $index.")
+/** Create a list with issues for a test dependency based on its [index]. */
+private fun createIssues(index: Int): List<Issue> =
+    emptyList<Issue>().takeIf { index % 2 == 0 } ?: listOf(
+        Issue(source = "test", message = "Test issue $index.")
     )
 
-/**
- * Construct an [AnalyzerResult] from the given sequence of [projectResults].
- */
+/** Construct an [AnalyzerResult] from the given sequence of [projectResults]. */
 private fun createAnalyzerResult(vararg projectResults: ProjectAnalyzerResult): AnalyzerResult {
-    val projects = projectResults.mapTo(sortedSetOf()) { it.project }
-    val packages = projectResults.flatMap { it.packages }.mapTo(sortedSetOf()) { CuratedPackage(it) }
+    val projects = projectResults.mapTo(mutableSetOf()) { it.project }
+    val packages = projectResults.flatMapTo(mutableSetOf()) { it.packages }
 
     return AnalyzerResult(projects, packages)
 }
 
-/**
- * Create a [ProjectAnalyzerResult] based on this test project.
- */
+/** Create a [ProjectAnalyzerResult] based on this test project. */
 private fun Project.createResult(): ProjectAnalyzerResult {
-    val packages = scopes.flatMap { it.dependencies }.mapTo(sortedSetOf()) { ref ->
+    val packages = scopes.flatMap { it.dependencies }.mapTo(mutableSetOf()) { ref ->
         Package.EMPTY.copy(id = ref.id)
     }
 
     return ProjectAnalyzerResult(this, packages)
 }
 
-/**
- * Return the project with the given [id] from this result or fail miserably if it cannot be found.
- */
+/** Return the project with the given [id] from this result or fail miserably if it cannot be found. */
 private fun AnalyzerResult.getProject(id: Identifier): Project {
     val project = projects.find { it.id == id }
-    return project ?: fail("Could not find project with ID $id.")
+    return project ?: AssertionErrorBuilder.fail("Could not find project with ID $id.")
 }

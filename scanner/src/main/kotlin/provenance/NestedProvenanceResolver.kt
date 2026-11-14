@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,43 +19,34 @@
 
 package org.ossreviewtoolkit.scanner.provenance
 
-import kotlinx.coroutines.runBlocking
+import org.apache.logging.log4j.kotlin.logger
 
-import org.apache.logging.log4j.kotlin.Logging
-
+import org.ossreviewtoolkit.downloader.WorkingTreeCache
 import org.ossreviewtoolkit.model.ArtifactProvenance
 import org.ossreviewtoolkit.model.KnownProvenance
 import org.ossreviewtoolkit.model.Provenance
 import org.ossreviewtoolkit.model.RepositoryProvenance
-import org.ossreviewtoolkit.scanner.utils.WorkingTreeCache
 
-/**
- * The [NestedProvenanceResolver] provides a function to resolve nested provenances.
- */
+/** The [NestedProvenanceResolver] provides a function to resolve nested provenances. */
 interface NestedProvenanceResolver {
     /**
      * Resolve nested [Provenance]s of the provided [provenance]. For an [ArtifactProvenance] the returned
      * [NestedProvenance] always contains only the provided [ArtifactProvenance]. For a [RepositoryProvenance] the
      * resolver looks for nested repositories, for example Git submodules or Mercurial subrepositories.
      */
-    fun resolveNestedProvenance(provenance: KnownProvenance): NestedProvenance
+    suspend fun resolveNestedProvenance(provenance: KnownProvenance): NestedProvenance
 }
 
-/**
- * The default implementation of [NestedProvenanceResolver].
- */
+/** The default implementation of [NestedProvenanceResolver]. */
 class DefaultNestedProvenanceResolver(
     private val storage: NestedProvenanceStorage,
     private val workingTreeCache: WorkingTreeCache
 ) : NestedProvenanceResolver {
-    companion object : Logging
-
-    override fun resolveNestedProvenance(provenance: KnownProvenance): NestedProvenance {
-        return when (provenance) {
+    override suspend fun resolveNestedProvenance(provenance: KnownProvenance): NestedProvenance =
+        when (provenance) {
             is ArtifactProvenance -> NestedProvenance(root = provenance, subRepositories = emptyMap())
-            is RepositoryProvenance -> runBlocking { resolveNestedRepository(provenance) }
+            is RepositoryProvenance -> resolveNestedRepository(provenance)
         }
-    }
 
     private suspend fun resolveNestedRepository(provenance: RepositoryProvenance): NestedProvenance {
         val storedResult = storage.readNestedProvenance(provenance)
@@ -70,7 +61,7 @@ class DefaultNestedProvenanceResolver(
             } else {
                 logger.info {
                     "Found a stored nested provenance for $provenance with at least one non-fixed revision, " +
-                            "restarting resolution."
+                        "restarting resolution."
                 }
             }
         } else {
@@ -95,7 +86,7 @@ class DefaultNestedProvenanceResolver(
                 // TODO: Find a way to figure out if the nested repository is configured with a fixed revision to
                 //       correctly set `hasOnlyFixedRevisions`. For now always assume that they are fixed because that
                 //       should be correct for most cases and otherwise the storage would have no effect.
-                storage.putNestedProvenance(
+                storage.writeNestedProvenance(
                     provenance,
                     NestedProvenanceResolutionResult(nestedProvenance, hasOnlyFixedRevisions = true)
                 )

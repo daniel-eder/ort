@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,37 +19,27 @@
 
 package org.ossreviewtoolkit.model
 
-import org.ossreviewtoolkit.utils.spdx.SpdxSingleLicenseExpression
+import java.util.EnumSet
+
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxSingleLicenseExpression
 
 data class RuleViolation(
-    /**
-     * The identifier of the rule that found this violation.
-     */
+    /** The identifier of the rule that found this violation. */
     val rule: String,
 
-    /**
-     * The identifier of the package that caused this rule violation.
-     */
+    /** The identifier of the package that caused this rule violation. */
     val pkg: Identifier?,
 
-    /**
-     * The name of the license that caused this rule violation. Can be null if the rule does not work on licenses.
-     */
+    /** The name of the license that caused this rule violation. Can be null if the rule does not work on licenses. */
     val license: SpdxSingleLicenseExpression?,
 
-    /**
-     * The [source][LicenseSource] of the [license]. Can be null if the rule does not work on licenses.
-     */
-    val licenseSource: LicenseSource?,
+    /** The [sources][licenseSources] of the [license]. Can be empty if the rule does not work on licenses. */
+    val licenseSources: EnumSet<LicenseSource>,
 
-    /**
-     * The severity of the rule violation.
-     */
+    /** The severity of the rule violation. */
     val severity: Severity,
 
-    /**
-     * A message explaining the rule violation.
-     */
+    /** A message explaining the rule violation. */
     val message: String,
 
     /**

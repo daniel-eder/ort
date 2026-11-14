@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,30 +19,28 @@
 
 package org.ossreviewtoolkit.model
 
+import com.fasterxml.jackson.annotation.JsonIgnore
+
+import java.io.File
+
 import kotlin.math.abs
 import kotlin.math.min
 
-/**
- * A [TextLocation] references text located in a file.
- */
+/** A [TextLocation] references text located in a file. */
 data class TextLocation(
-    /**
-     * The path of the file that contains the text.
-     */
+    /** The path (with invariant separators) of the file that contains the text. */
     val path: String,
 
-    /**
-     * The line the text is starting at.
-     */
+    /** The line the text is starting at. */
     val startLine: Int,
 
-    /**
-     * The line the text is ending at.
-     */
+    /** The line the text is ending at. */
     val endLine: Int
 ) : Comparable<TextLocation> {
     companion object {
         const val UNKNOWN_LINE = -1
+
+        // This comparator is consistent with `equals()` as all properties are taken into account.
         private val COMPARATOR = compareBy<TextLocation>({ it.path }, { it.startLine }, { it.endLine })
     }
 
@@ -56,21 +54,23 @@ data class TextLocation(
         }
     }
 
-    /**
-     * A convenience constructor that sets [startLine] and [endLine] to the same [line].
-     */
+    /** A convenience constructor that sets [startLine] and [endLine] to the same [line]. */
     constructor(path: String, line: Int) : this(path, line, line)
 
+    /** Indicate whether this TextLocation has known start and end lines. */
+    @JsonIgnore
+    val hasLineRange = startLine != UNKNOWN_LINE && endLine != UNKNOWN_LINE
+
+    /**
+     * Return a negative integer, zero, or a positive integer as this TextLocation comes before, is the same, or comes
+     * after the [other] TextLocation.
+     */
     override fun compareTo(other: TextLocation) = COMPARATOR.compare(this, other)
 
-    /**
-     * Return whether the given [line] is contained in the location.
-     */
+    /** Return whether the given [line] is contained in the location. */
     operator fun contains(line: Int) = line != UNKNOWN_LINE && line in startLine..endLine
 
-    /**
-     * Return whether the given [other] location is contained in this location.
-     */
+    /** Return whether the given [other] location is contained in this location. */
     operator fun contains(other: TextLocation) = other.path == path && other.startLine in this && other.endLine in this
 
     /**
@@ -88,4 +88,20 @@ data class TextLocation(
             linesOverlapWith(other) -> 0
             else -> min(abs(other.startLine - endLine), abs(startLine - other.endLine))
         }
+
+    /**
+     * Return a [TextLocation] whose path is relative to [basePath], or throw an [IllegalArgumentException] if the paths
+     * have different roots.
+     */
+    fun withRelativePath(basePath: File): TextLocation {
+        val pathAsFile = File(path)
+
+        val relativePath = when {
+            !pathAsFile.isAbsolute -> pathAsFile
+            basePath.isFile -> pathAsFile.relativeTo(basePath.parentFile)
+            else -> pathAsFile.relativeTo(basePath)
+        }
+
+        return copy(path = relativePath.invariantSeparatorsPath)
+    }
 }

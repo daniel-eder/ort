@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2019 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,67 +20,87 @@
 package org.ossreviewtoolkit.clients.clearlydefined
 
 import io.kotest.core.spec.style.WordSpec
+import io.kotest.engine.TestAbortedException
 import io.kotest.matchers.collections.beEmpty
+import io.kotest.matchers.collections.shouldContain
 import io.kotest.matchers.comparables.shouldBeGreaterThan
+import io.kotest.matchers.maps.shouldMatchExactly
 import io.kotest.matchers.nulls.shouldNotBeNull
+import io.kotest.matchers.result.shouldBeSuccess
 import io.kotest.matchers.should
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNot
 import io.kotest.matchers.string.include
+import io.kotest.matchers.string.shouldContain
+import io.kotest.matchers.string.shouldNotContain
 import io.kotest.matchers.string.shouldStartWith
 
-import java.io.File
-
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.json.decodeFromStream
+import java.net.SocketTimeoutException
 
 import org.ossreviewtoolkit.clients.clearlydefined.ClearlyDefinedService.ContributionInfo
 import org.ossreviewtoolkit.clients.clearlydefined.ClearlyDefinedService.ContributionPatch
 import org.ossreviewtoolkit.clients.clearlydefined.ClearlyDefinedService.Server
 
+import retrofit2.HttpException
+
 class ClearlyDefinedServiceFunTest : WordSpec({
+    val service by lazy { ClearlyDefinedService.create() }
+
+    "Harvests" should {
+        "not contain curation data" {
+            // https://clearlydefined.io/definitions/sourcearchive/mavencentral/org.slf4j/slf4j-log4j12/1.7.30
+            val coordinates = Coordinates(
+                type = ComponentType.SOURCE_ARCHIVE,
+                provider = Provider.MAVEN_CENTRAL,
+                namespace = "org.slf4j",
+                name = "slf4j-log4j12",
+                revision = "1.7.30"
+            )
+
+            val data = service.getLatestHarvestToolData(coordinates, "clearlydefined").withIgnoreUnavailable()
+
+            data.toString() shouldNotContain "0b97c416e42a184ff9728877b461c616187c58f7"
+        }
+    }
+
     "A contribution patch" should {
         "be correctly deserialized when using empty facet arrays" {
             // See https://github.com/clearlydefined/curated-data/blob/0b2db78/curations/maven/mavencentral/com.google.code.gson/gson.yaml#L10-L11.
-            val curation = File("src/funTest/assets/gson.json").inputStream().use {
-                ClearlyDefinedService.JSON.decodeFromStream<Curation>(it)
-            }
+            val gsonJson = javaClass.getResource("/gson.json").readText()
+            val curation = ClearlyDefinedService.JSON.decodeFromString<Curation>(gsonJson)
 
-            curation.described?.facets?.dev.shouldNotBeNull() should beEmpty()
-            curation.described?.facets?.tests.shouldNotBeNull() should beEmpty()
+            curation.described?.facets shouldNotBeNull {
+                dev.shouldNotBeNull() should beEmpty()
+                tests.shouldNotBeNull() should beEmpty()
+            }
         }
     }
 
     "Downloading a contribution patch" should {
+        // https://clearlydefined.io/definitions/sourcearchive/mavencentral/javax.servlet/javax.servlet-api/3.1.0
         val coordinates = Coordinates(
-            ComponentType.MAVEN,
-            Provider.MAVEN_CENTRAL,
-            "javax.servlet",
-            "javax.servlet-api",
-            "3.1.0"
+            type = ComponentType.MAVEN,
+            provider = Provider.MAVEN_CENTRAL,
+            namespace = "javax.servlet",
+            name = "javax.servlet-api",
+            revision = "3.1.0"
         )
 
         "return single curation data" {
-            val service = ClearlyDefinedService.create(Server.PRODUCTION)
+            val curation = runCatching { service.getCuration(coordinates) }.withIgnoreUnavailable()
 
-            val curation = service.getCuration(
-                coordinates.type,
-                coordinates.provider,
-                coordinates.namespace.orEmpty(),
-                coordinates.name,
-                coordinates.revision.orEmpty()
-            )
-
-            curation.licensed?.declared shouldBe "CDDL-1.0 OR GPL-2.0-only WITH Classpath-exception-2.0"
+            with(curation.shouldBeSuccess()) {
+                licensed?.declared shouldBe "CDDL-1.0 OR GPL-2.0-only WITH Classpath-exception-2.0"
+            }
         }
 
         "return bulk curation data" {
-            val service = ClearlyDefinedService.create(Server.PRODUCTION)
+            val curations = runCatching { service.getCurations(listOf(coordinates)) }.withIgnoreUnavailable()
 
-            val curations = service.getCurations(listOf(coordinates))
-            val curation = curations[coordinates]?.curations?.get(coordinates)
-
-            curation?.licensed?.declared shouldBe "CDDL-1.0 OR GPL-2.0-only WITH Classpath-exception-2.0"
+            with(curations.shouldBeSuccess()) {
+                val curation = get(coordinates)?.curations?.get(coordinates)
+                curation?.licensed?.declared shouldBe "CDDL-1.0 OR GPL-2.0-only WITH Classpath-exception-2.0"
+            }
         }
     }
 
@@ -97,6 +117,7 @@ class ClearlyDefinedServiceFunTest : WordSpec({
             "6.2.3" to Curation(licensed = CurationLicensed(declared = "Apache-1.0"))
         )
 
+        // https://clearlydefined.io/definitions/npm/npmjs/@nestjs/platform-express/6.2.3
         val patch = Patch(
             Coordinates(
                 type = ComponentType.NPM,
@@ -119,14 +140,83 @@ class ClearlyDefinedServiceFunTest : WordSpec({
         // Disable this test by default as it talks to the real development instance of ClearlyDefined and creates
         // pull-requests at https://github.com/clearlydefined/curated-data-dev.
         "return a summary of the created pull-request".config(enabled = false) {
-            val service = ClearlyDefinedService.create(Server.DEVELOPMENT)
+            val developmentService = ClearlyDefinedService.create(Server.DEVELOPMENT)
 
-            val summary = service.putCuration(ContributionPatch(info, listOf(patch)))
+            val summary = developmentService.putCuration(ContributionPatch(info, listOf(patch)))
 
-            summary.shouldNotBeNull().run {
+            summary shouldNotBeNull {
                 prNumber shouldBeGreaterThan 0
-                url shouldStartWith "https://github.com/clearlydefined/curated-data-dev/pull/"
+                url shouldStartWith "${Server.DEVELOPMENT.projectUrl}/pull/"
             }
         }
     }
+
+    "Definitions" should {
+        "contain defined data properties for single requests" {
+            // https://clearlydefined.io/definitions/npm/npmjs/-/eslint-plugin-tsdoc/0.2.2
+            val coordinates = Coordinates(
+                type = ComponentType.NPM,
+                provider = Provider.NPM_JS,
+                name = "eslint-plugin-tsdoc",
+                revision = "0.2.2"
+            )
+
+            val defined = runCatching { service.getDefinition(coordinates) }.withIgnoreUnavailable()
+
+            with(defined.shouldBeSuccess()) {
+                files?.get(11)?.facets.shouldNotBeNull() shouldContain "tests"
+                described.releaseDate shouldBe "2020-02-22"
+            }
+        }
+
+        "contain defined data properties for batch requests" {
+            // https://clearlydefined.io/definitions/npm/npmjs/-/eslint-plugin-tsdoc/0.2.2
+            val coordinates = Coordinates(
+                type = ComponentType.NPM,
+                provider = Provider.NPM_JS,
+                name = "eslint-plugin-tsdoc",
+                revision = "0.2.2"
+            )
+
+            val definitions = runCatching { service.getDefinitions(listOf(coordinates)) }.withIgnoreUnavailable()
+
+            definitions.shouldBeSuccess().shouldMatchExactly(
+                coordinates to { defined ->
+                    defined.files?.get(11)?.facets.shouldNotBeNull() shouldContain "tests"
+                    defined.described.releaseDate shouldBe "2020-02-22"
+                }
+            )
+        }
+
+        "contain curation data" {
+            // https://clearlydefined.io/definitions/sourcearchive/mavencentral/org.slf4j/slf4j-log4j12/1.7.30
+            val coordinates = Coordinates(
+                type = ComponentType.SOURCE_ARCHIVE,
+                provider = Provider.MAVEN_CENTRAL,
+                namespace = "org.slf4j",
+                name = "slf4j-log4j12",
+                revision = "1.7.30"
+            )
+
+            val defined = runCatching { service.getDefinition(coordinates) }.withIgnoreUnavailable()
+
+            defined.toString() shouldContain "0b97c416e42a184ff9728877b461c616187c58f7"
+        }
+    }
 })
+
+/**
+ * Skip the test by throwing a `TestAbortedException` in case the service is unavailable for some reason. Otherwise,
+ * return the [Result] as-is.
+ *
+ * This way the tests can still act as a reminder to re-align the data model in case it deviated, without making noise
+ * when network is not available.
+ */
+private fun <T> Result<T>.withIgnoreUnavailable(): Result<T> =
+    onFailure { e ->
+        throw when (e) {
+            is SocketTimeoutException -> TestAbortedException()
+            is HttpException -> if (e.code().isServerSideError) TestAbortedException() else e
+            else -> e
+        }
+    }

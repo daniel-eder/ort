@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2020 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,7 +40,7 @@ data class IdentifiedFile(
 
     val userSurname: String?,
 
-    val userUsername: String?,
+    val userUsername: String?
 ) : Summarizable {
     @JsonUnwrapped(prefix = "component_")
     lateinit var component: Component // TODO: How to get the additional components? Only one is returned

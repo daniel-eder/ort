@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,67 +19,23 @@
 
 plugins {
     // Apply core plugins.
-    `java-library`
-}
+    `java-test-fixtures`
 
-val generatedResourcesDir = file("$buildDir/generated-resources/main")
-val copyWebAppTemplate by tasks.registering(Copy::class) {
-    dependsOn(":reporter-web-app:yarnBuild")
-
-    from(project(":reporter-web-app").file("build")) {
-        include("scan-report-template.html")
-    }
-
-    into(generatedResourcesDir)
-    outputs.cacheIf { true }
-}
-
-sourceSets.named("main") {
-    output.dir(mapOf("builtBy" to copyWebAppTemplate), generatedResourcesDir)
-}
-
-repositories {
-    exclusiveContent {
-        forRepository {
-            maven("https://jitpack.io")
-        }
-
-        filter {
-            includeGroup("com.github.ralfstuckert.pdfbox-layout")
-            includeGroup("com.github.everit-org.json-schema")
-        }
-    }
+    // Apply precompiled plugins.
+    id("ort-library-conventions")
 }
 
 dependencies {
-    api(project(":model"))
+    api(projects.model)
+    api(projects.plugins.api)
+    api(projects.plugins.licenseFactProviders.licenseFactProviderApi)
 
-    implementation(project(":clients:fossid-webapp"))
-    implementation(project(":downloader"))
-    implementation(project(":utils:ort-utils"))
-    implementation(project(":utils:scripting-utils"))
-    implementation(project(":utils:spdx-utils"))
-
-    implementation("org.jetbrains.kotlin:kotlin-scripting-common")
+    implementation(projects.utils.scriptUtils)
     implementation("org.jetbrains.kotlin:kotlin-scripting-jvm-host")
 
-    implementation(libs.asciidoctorj)
-    implementation(libs.asciidoctorjPdf)
-    implementation(libs.commonsCompress)
-    implementation(libs.cyclonedx)
-    implementation(libs.flexmark)
-    implementation(libs.freemarker)
-    implementation(libs.jacksonDatatypeJsr310)
-    implementation(libs.jacksonModuleKotlin)
-    implementation(libs.kotlinxCoroutines)
-    implementation(libs.kotlinxHtml)
-    implementation(libs.poiOoxml)
-    implementation(libs.retrofit)
+    funTestImplementation(testFixtures(project(path)))
 
-    // This is required to not depend on the version of Apache Xalan bundled with the JDK. Otherwise, the formatting of
-    // the HTML generated in StaticHtmlReporter is slightly different with different Java versions.
-    implementation(libs.saxonHe)
+    testFixturesImplementation(projects.utils.testUtils)
 
-    testImplementation(libs.kotestAssertionsJson)
-    testImplementation(libs.mockk)
+    kotlinScriptDef(projects.utils.scriptUtils)
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2019 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,24 +21,23 @@ package org.ossreviewtoolkit.utils.ort.storage
 
 import java.io.InputStream
 
-/**
- * A storage for files, like a local directory or a remote server.
- */
+/** A storage for files, like a local directory or a remote server. */
 interface FileStorage {
-    /**
-     * Return whether the given [path] exists or not.
-     */
-    fun exists(path: String): Boolean
+    /** Return whether the given [path] exists or not. */
+    suspend fun exists(path: String): Boolean
 
     /**
      * Read the file at [path]. It is the caller's responsibility to close the returned [InputStream] after consuming
      * it.
      */
-    fun read(path: String): InputStream
+    suspend fun read(path: String): InputStream
 
     /**
      * Write the data from [inputStream] to the file at [path]. If the file already exists it is overwritten. The
      * provided [inputStream] is closed after writing it to the file.
      */
-    fun write(path: String, inputStream: InputStream)
+    suspend fun write(path: String, inputStream: InputStream)
+
+    /** Delete the file at the given [path] and return whether the operation was successful. */
+    suspend fun delete(path: String): Boolean
 }

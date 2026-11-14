@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2019 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,9 +25,7 @@ import com.fasterxml.jackson.databind.util.StdConverter
 
 @JsonInclude(JsonInclude.Include.NON_EMPTY)
 data class HttpFileStorageConfiguration(
-    /**
-     * The URL of the HTTP server, e.g. "https://example.com/storage".
-     */
+    /** The URL of the HTTP server, e.g. "https://example.com/storage". */
     val url: String,
 
     /**
@@ -44,7 +42,7 @@ data class HttpFileStorageConfiguration(
      * credentials, values are masked when this class is serialized with Jackson.
      */
     @JsonSerialize(contentConverter = MaskStringConverter::class)
-    val headers: Map<String, String>
+    val headers: Map<String, String> = emptyMap()
 )
 
 class MaskStringConverter : StdConverter<String, String>() {

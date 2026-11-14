@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,24 +22,41 @@ package org.ossreviewtoolkit.evaluator
 import io.kotest.core.spec.style.WordSpec
 import io.kotest.matchers.shouldBe
 
+import java.time.Instant
+
+import org.ossreviewtoolkit.model.AdvisorDetails
+import org.ossreviewtoolkit.model.AdvisorResult
+import org.ossreviewtoolkit.model.AdvisorRun
+import org.ossreviewtoolkit.model.AdvisorSummary
 import org.ossreviewtoolkit.model.CuratedPackage
+import org.ossreviewtoolkit.model.Identifier
 import org.ossreviewtoolkit.model.LicenseSource
+import org.ossreviewtoolkit.model.OrtResult
 import org.ossreviewtoolkit.model.Package
+import org.ossreviewtoolkit.model.config.AdvisorConfiguration
+import org.ossreviewtoolkit.model.licenses.LicenseView
 import org.ossreviewtoolkit.model.licenses.ResolvedLicense
 import org.ossreviewtoolkit.model.licenses.ResolvedOriginalExpression
-import org.ossreviewtoolkit.utils.spdx.SpdxLicenseIdExpression
-import org.ossreviewtoolkit.utils.spdx.SpdxSingleLicenseExpression
+import org.ossreviewtoolkit.utils.common.enumSetOf
+import org.ossreviewtoolkit.utils.ort.DeclaredLicenseProcessor
+import org.ossreviewtoolkit.utils.ort.Environment
+import org.ossreviewtoolkit.utils.spdx.SpdxConstants
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxExpression.Strictness
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxLicenseIdExpression
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxSingleLicenseExpression
+import org.ossreviewtoolkit.utils.spdxexpression.toSpdx
 
 class PackageRuleTest : WordSpec() {
-    private val ruleSet = ruleSet(ortResult)
+    private fun createPackageRule(pkg: Package, result: OrtResult = ortResult): PackageRule {
+        val ruleSet = ruleSet(result.addPackage(pkg))
 
-    private fun createPackageRule(pkg: Package) =
-        PackageRule(
+        return PackageRule(
             ruleSet = ruleSet,
             name = "test",
             pkg = CuratedPackage(pkg),
             resolvedLicenseInfo = ruleSet.licenseInfoResolver.resolveLicenseInfo(pkg.id)
         )
+    }
 
     private fun PackageRule.createLicenseRule(license: SpdxSingleLicenseExpression, licenseSource: LicenseSource) =
         LicenseRule(
@@ -50,10 +67,27 @@ class PackageRuleTest : WordSpec() {
                 originalExpressions = setOf(ResolvedOriginalExpression(license, licenseSource)),
                 locations = emptySet()
             ),
-            licenseSource = licenseSource
+            licenseSources = enumSetOf(licenseSource)
         )
 
     init {
+        "getEffectiveLicense()" should {
+            "return the effective license corresponding to the given license view" {
+                val declaredLicenses = setOf("Apache-2.0")
+                val rule = createPackageRule(
+                    pkg = Package.EMPTY.copy(
+                        id = Identifier("Maven:some:package:0.0.1"),
+                        concludedLicense = "MIT".toSpdx(Strictness.ALLOW_ANY),
+                        declaredLicenses = declaredLicenses,
+                        declaredLicensesProcessed = DeclaredLicenseProcessor.process(declaredLicenses)
+                    )
+                )
+
+                rule.getEffectiveLicense(LicenseView.ONLY_DECLARED) shouldBe "Apache-2.0".toSpdx()
+                rule.getEffectiveLicense(LicenseView.CONCLUDED_OR_DECLARED_AND_DETECTED) shouldBe "MIT".toSpdx()
+            }
+        }
+
         "hasLicense()" should {
             "return true if the package has concluded licenses" {
                 val rule = createPackageRule(packageWithOnlyConcludedLicense)
@@ -95,6 +129,32 @@ class PackageRuleTest : WordSpec() {
                 val matcher = rule.hasLicense()
 
                 matcher.matches() shouldBe false
+            }
+        }
+
+        "hasConcludedLicense()" should {
+            "return true if the concluded license is a license expression" {
+                val rule = createPackageRule(packageWithConcludedLicense("MIT"))
+
+                rule.hasConcludedLicense().matches() shouldBe true
+            }
+
+            "return true if the concluded license is ${SpdxConstants.NONE}" {
+                val rule = createPackageRule(packageWithConcludedLicense(SpdxConstants.NONE))
+
+                rule.hasConcludedLicense().matches() shouldBe true
+            }
+
+            "return false if the concluded license is ${SpdxConstants.NOASSERTION}" {
+                val rule = createPackageRule(packageWithConcludedLicense(SpdxConstants.NOASSERTION))
+
+                rule.hasConcludedLicense().matches() shouldBe false
+            }
+
+            "return false if the concluded license is null" {
+                val rule = createPackageRule(packageWithConcludedLicense(null))
+
+                rule.hasConcludedLicense().matches() shouldBe false
             }
         }
 
@@ -215,48 +275,85 @@ class PackageRuleTest : WordSpec() {
 
             "return true if a severity of a vulnerability is higher than the threshold" {
                 val rule = createPackageRule(packageWithVulnerabilities)
-                val matcher = rule.hasVulnerability("8.9", "CVSS3") { value, threshold ->
-                    value.toFloat() >= threshold.toFloat()
-                }
+                val matcher = rule.hasVulnerability(8.9f, "CVSS3")
 
                 matcher.matches() shouldBe true
             }
 
             "return false if a severity of a vulnerability is lower than the threshold" {
                 val rule = createPackageRule(packageWithVulnerabilities)
-                val matcher = rule.hasVulnerability("9.1", "CVSS3") { value, threshold ->
-                    value.toFloat() >= threshold.toFloat()
-                }
+                val matcher = rule.hasVulnerability(9.1f, "CVSS3")
 
                 matcher.matches() shouldBe false
             }
 
             "return true if a severity of a vulnerability is the same as the threshold" {
                 val rule = createPackageRule(packageWithVulnerabilities)
-                val matcher = rule.hasVulnerability("9.0", "CVSS3") { value, threshold ->
-                    value.toFloat() >= threshold.toFloat()
-                }
-
-                matcher.matches() shouldBe true
-            }
-
-            "return true if a severity of a vulnerability is the same as the threshold without decimals" {
-                val rule = createPackageRule(packageWithVulnerabilities)
-                val matcher = rule.hasVulnerability("9", "CVSS3") { value, threshold ->
-                    value.toFloat() >= threshold.toFloat()
-                }
+                val matcher = rule.hasVulnerability(9.0f, "CVSS3")
 
                 matcher.matches() shouldBe true
             }
 
             "return false if no vulnerability is found for the scoringSystem" {
                 val rule = createPackageRule(packageWithVulnerabilities)
-                val matcher = rule.hasVulnerability("10.0", "fake-scoring-system") { value, threshold ->
-                    value.toFloat() >= threshold.toFloat()
-                }
+                val matcher = rule.hasVulnerability(10.0f, "fake-scoring-system")
 
                 matcher.matches() shouldBe false
             }
+
+            "return true if a vulnerability with a qualitative severity is found" {
+                val qualitativeCriticalVulnerability = criticalVulnerability.copy(
+                    references = criticalVulnerability.references.map { reference ->
+                        if (reference.severity == "CRITICAL") {
+                            reference.copy(score = null)
+                        } else {
+                            reference
+                        }
+                    }
+                )
+                val advisor = AdvisorRun(
+                    startTime = Instant.EPOCH,
+                    endTime = Instant.EPOCH,
+                    environment = Environment(),
+                    config = AdvisorConfiguration(),
+                    results = mapOf(
+                        packageWithVulnerabilities.id to listOf(
+                            AdvisorResult(
+                                advisor = AdvisorDetails("Advisor"),
+                                summary = AdvisorSummary(startTime = Instant.EPOCH, endTime = Instant.EPOCH),
+                                vulnerabilities = listOf(
+                                    qualitativeCriticalVulnerability,
+                                    lowVulnerability
+                                )
+                            )
+                        )
+                    )
+                )
+                val ortResultWithQualitativeVulnerability = ortResult.copy(advisor = advisor)
+                val rule = createPackageRule(packageWithVulnerabilities, ortResultWithQualitativeVulnerability)
+                val matcher = rule.hasVulnerability(10.0f, "CVSS3")
+
+                matcher.matches() shouldBe true
+            }
         }
     }
+}
+
+private fun packageWithConcludedLicense(license: String?): Package =
+    Package.EMPTY.copy(
+        id = Identifier("Maven:some:package:0.0.1"),
+        concludedLicense = license?.toSpdx(Strictness.ALLOW_ANY)
+    )
+
+private fun OrtResult.addPackage(pkg: Package): OrtResult {
+    val analyzerResult = analyzer?.result ?: return this
+    if (pkg in analyzerResult.packages) return this
+
+    return copy(
+        analyzer = analyzer!!.copy(
+            result = analyzerResult.copy(
+                packages = analyzerResult.packages + pkg
+            )
+        )
+    )
 }

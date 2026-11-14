@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2020 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,39 +21,35 @@ package org.ossreviewtoolkit.reporter
 
 import kotlin.script.experimental.api.ResultValue
 import kotlin.script.experimental.api.ScriptEvaluationConfiguration
+import kotlin.script.experimental.api.SourceCode
 import kotlin.script.experimental.api.constructorArgs
 import kotlin.script.experimental.api.scriptsInstancesSharing
 import kotlin.script.experimental.jvmhost.createJvmCompilationConfigurationFromTemplate
 
-import org.ossreviewtoolkit.model.OrtIssue
+import org.ossreviewtoolkit.model.Issue
 import org.ossreviewtoolkit.model.OrtResult
-import org.ossreviewtoolkit.utils.scripting.ScriptRunner
+import org.ossreviewtoolkit.utils.script.HowToFixTextProviderScriptTemplate
+import org.ossreviewtoolkit.utils.script.ScriptRunner
 
-/**
- * Provides how-to-fix texts in Markdown format for any given [OrtIssue].
- */
+/** Provides how-to-fix texts in Markdown format for any given [Issue]. */
 fun interface HowToFixTextProvider {
     companion object {
-        /**
-         * A [HowToFixTextProvider] which returns null for any given [OrtIssue].
-         */
+        /** A [HowToFixTextProvider] which returns null for any given [Issue]. */
         val NONE = HowToFixTextProvider { null }
 
-        /**
-         * Return the [HowToFixTextProvider] which in-turn has to be returned by the given [script].
-         */
+        /** Return the [HowToFixTextProvider] which in-turn has to be returned by the given [script]. */
         fun fromKotlinScript(script: String, ortResult: OrtResult): HowToFixTextProvider =
-            HowToFixScriptRunner(ortResult).run(script)
+            HowToFixScriptRunner(ortResult).runScript(script)
     }
 
     /**
      * Return a Markdown text describing how to fix the given [issue]. Non-null return values override the default
      * how-to-fix texts, while a null value keeps the default.
      */
-    fun getHowToFixText(issue: OrtIssue): String?
+    fun getHowToFixText(issue: Issue): String?
 }
 
-private class HowToFixScriptRunner(ortResult: OrtResult) : ScriptRunner() {
+private class HowToFixScriptRunner(ortResult: OrtResult) : ScriptRunner<HowToFixTextProvider>() {
     override val compConfig = createJvmCompilationConfigurationFromTemplate<HowToFixTextProviderScriptTemplate>()
 
     override val evalConfig = ScriptEvaluationConfiguration {
@@ -61,8 +57,8 @@ private class HowToFixScriptRunner(ortResult: OrtResult) : ScriptRunner() {
         scriptsInstancesSharing(true)
     }
 
-    fun run(script: String): HowToFixTextProvider {
-        val scriptValue = runScript(script) as ResultValue.Value
+    override fun runScript(script: SourceCode): HowToFixTextProvider {
+        val scriptValue = run(script) as ResultValue.Value
         return scriptValue.value as HowToFixTextProvider
     }
 }

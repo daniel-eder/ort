@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2019 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,53 +20,40 @@
 package org.ossreviewtoolkit.model.utils
 
 import java.io.File
-import java.io.IOException
 
 import kotlin.time.measureTime
 import kotlin.time.measureTimedValue
 
-import org.apache.logging.log4j.kotlin.Logging
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+import org.apache.logging.log4j.kotlin.logger
+import org.apache.tika.Tika
 
 import org.ossreviewtoolkit.model.KnownProvenance
 import org.ossreviewtoolkit.utils.common.FileMatcher
 import org.ossreviewtoolkit.utils.common.collectMessages
+import org.ossreviewtoolkit.utils.common.div
 import org.ossreviewtoolkit.utils.common.packZip
+import org.ossreviewtoolkit.utils.common.safeDeleteRecursively
 import org.ossreviewtoolkit.utils.common.unpackZip
 import org.ossreviewtoolkit.utils.ort.createOrtTempFile
 import org.ossreviewtoolkit.utils.ort.ortDataDirectory
 import org.ossreviewtoolkit.utils.ort.showStackTrace
-import org.ossreviewtoolkit.utils.ort.storage.FileStorage
 
-/**
- * A class to archive files matched by provided patterns in a ZIP file that is stored in a [FileStorage][storage].
- */
+/** A class to archive files matched by provided patterns in a ZIP file that is stored in a [FileStorage][storage]. */
 class FileArchiver(
     /**
-     * A collection of globs to match the paths of files that shall be archived. For details about the glob pattern see
-     * [java.nio.file.FileSystem.getPathMatcher].
+     * A collection of globs to match the paths of files that shall be archived. For details about the glob patterns see
+     * [FileMatcher].
      */
     patterns: Collection<String>,
 
-    /**
-     * The [FileArchiverStorage] to use for archiving files.
-     */
-    internal val storage: FileArchiverStorage
+    /** The [ProvenanceFileStorage] to use for archiving files. */
+    private val storage: ProvenanceFileStorage
 ) {
-    constructor(
-        /**
-         * A collection of globs to match the paths of files that shall be archived. For details about the glob pattern
-         * see [java.nio.file.FileSystem.getPathMatcher].
-         */
-        patterns: Collection<String>,
-
-        /**
-         * The [FileStorage] to use for archiving files.
-         */
-        storage: FileStorage
-    ) : this(patterns, FileArchiverFileStorage(storage))
-
-    companion object : Logging {
-        val DEFAULT_ARCHIVE_DIR by lazy { ortDataDirectory.resolve("scanner/archive") }
+    companion object {
+        val DEFAULT_ARCHIVE_DIR by lazy { ortDataDirectory / "scanner" / "archive" }
     }
 
     private val matcher = FileMatcher(
@@ -74,68 +61,72 @@ class FileArchiver(
         ignoreCase = true
     )
 
-    /**
-     * Return whether an archive corresponding to [provenance] exists.
-     */
-    fun hasArchive(provenance: KnownProvenance): Boolean = storage.hasArchive(provenance)
+    /** Return whether an archive corresponding to [provenance] exists. */
+    suspend fun hasArchive(provenance: KnownProvenance): Boolean = storage.hasData(provenance)
 
-    /**
-     * Archive all files in [directory] matching any of the configured patterns in the [storage].
-     */
-    fun archive(directory: File, provenance: KnownProvenance) {
+    /** Archive all files in [directory] matching any of the configured patterns in the [storage]. */
+    suspend fun archive(directory: File, provenance: KnownProvenance) {
         logger.info { "Archiving files matching ${matcher.patterns} from '$directory'..." }
 
         val zipFile = createOrtTempFile(suffix = ".zip")
+        val tika = Tika()
 
-        val zipDuration = measureTime {
-            directory.packZip(zipFile, overwrite = true) { file ->
-                val relativePath = file.relativeTo(directory).invariantSeparatorsPath
+        try {
+            val zipDuration = measureTime {
+                withContext(Dispatchers.IO) {
+                    directory.packZip(zipFile, overwrite = true) { file ->
+                        val relativePath = file.relativeTo(directory).invariantSeparatorsPath
 
-                matcher.matches(relativePath).also { result ->
-                    logger.debug {
-                        if (result) {
-                            "Adding '$relativePath' to archive."
-                        } else {
-                            "Not adding '$relativePath' to archive."
+                        if (!matcher.matches(relativePath)) return@packZip false
+
+                        if (!tika.detect(file).startsWith("text/")) {
+                            logger.info { "Not adding file '$relativePath' to archive because it is not a text file." }
+                            return@packZip false
                         }
+
+                        logger.debug { "Adding '$relativePath' to archive." }
+                        true
                     }
                 }
             }
+
+            logger.info { "Archived directory '$directory' in $zipDuration." }
+
+            val writeDuration = measureTime { storage.putData(provenance, zipFile.inputStream(), zipFile.length()) }
+
+            logger.info { "Wrote archive of directory '$directory' to storage in $writeDuration." }
+        } finally {
+            zipFile.parentFile.safeDeleteRecursively()
         }
-
-        logger.info { "Archived directory '$directory' in $zipDuration." }
-
-        val writeDuration = measureTime { storage.addArchive(provenance, zipFile) }
-
-        logger.info { "Wrote archive of directory '$directory' to storage in $writeDuration." }
-
-        zipFile.delete()
     }
 
-    /**
-     * Unarchive the archive corresponding to [provenance].
-     */
-    fun unarchive(directory: File, provenance: KnownProvenance): Boolean {
-        val (zipFile, readDuration) = measureTimedValue { storage.getArchive(provenance) }
+    /** Unarchive the data for [provenance] to [directory]. Return true on success or false on failure. */
+    suspend fun unarchive(directory: File, provenance: KnownProvenance): Boolean {
+        if (!storage.hasData(provenance)) {
+            logger.info { "Could not find an archive for $provenance." }
+            return false
+        }
 
-        logger.info { "Read archive of directory '$directory' from storage in $readDuration." }
+        val (zipInputStream, readDuration) = measureTimedValue { storage.getData(provenance) }
 
-        if (zipFile == null) return false
+        logger.info { "Got archive for $provenance in $readDuration." }
 
-        return try {
-            val unzipDuration = measureTime { zipFile.unpackZip(directory) }
+        if (zipInputStream == null) return false
 
-            logger.info { "Unarchived directory '$directory' in $unzipDuration." }
+        return runCatching {
+            val unzipDuration = measureTime {
+                withContext(Dispatchers.IO) {
+                    zipInputStream.unpackZip(directory)
+                }
+            }
+
+            logger.info { "Unarchived data for $provenance to '$directory' in $unzipDuration." }
 
             true
-        } catch (e: IOException) {
-            e.showStackTrace()
+        }.onFailure {
+            it.showStackTrace()
 
-            logger.error { "Could not extract ${zipFile.absolutePath}: ${e.collectMessages()}" }
-
-            false
-        } finally {
-            zipFile.delete()
-        }
+            logger.error { "Failed to unarchive data for $provenance: ${it.collectMessages()}" }
+        }.isSuccess
     }
 }

@@ -1,0 +1,124 @@
+---
+project:
+  id: "PIP::requirements.txt:<REPLACE_VCS_REVISION>"
+  definition_file_path: "plugins/package-managers/python/src/funTest/assets/projects/synthetic/pip-python3/requirements.txt"
+  declared_licenses: []
+  declared_licenses_processed: {}
+  vcs:
+    type: ""
+    url: ""
+    revision: ""
+    path: ""
+  vcs_processed:
+    type: "Git"
+    url: "<REPLACE_VCS_PROCESSED_URL>"
+    revision: "<REPLACE_VCS_REVISION>"
+    path: "<REPLACE_VCS_PATH>"
+  homepage_url: ""
+  scopes:
+  - name: "install"
+    dependencies:
+    - id: "PyPI::django:2.2.20"
+      dependencies:
+      - id: "PyPI::pytz:2026.6"
+      - id: "PyPI::sqlparse:0.6.1"
+packages:
+- id: "PyPI::django:2.2.20"
+  purl: "pkg:pypi/django@2.2.20"
+  authors:
+  - "Django Software Foundation <foundation@djangoproject.com>"
+  declared_licenses:
+  - "BSD"
+  - "BSD License"
+  declared_licenses_processed:
+    spdx_expression: "BSD-3-Clause"
+    mapped:
+      BSD: "BSD-3-Clause"
+      BSD License: "BSD-3-Clause"
+  description: "A high-level Python Web framework that encourages rapid development\
+    \ and clean, pragmatic design."
+  homepage_url: "https://www.djangoproject.com/"
+  binary_artifact:
+    url: "https://files.pythonhosted.org/packages/b1/88/bd220ea3e4e12c42f2215285cb101d925f95e42b093f390c823e61c94f00/Django-2.2.20-py3-none-any.whl"
+    hash:
+      value: "2484f115891ab1a0e9ae153602a641fbc15d7894c036d79fb78662c0965d7954"
+      algorithm: "SHA-256"
+  source_artifact:
+    url: "https://files.pythonhosted.org/packages/3c/e0/2ab562729727dc25d800134f811f8e15e56fb28c44dfab5222a51b9d2b20/Django-2.2.20.tar.gz"
+    hash:
+      value: "2569f9dc5f8e458a5e988b03d6b7a02bda59b006d6782f4ea0fd590ed7336a64"
+      algorithm: "SHA-256"
+  vcs:
+    type: ""
+    url: ""
+    revision: ""
+    path: ""
+  vcs_processed:
+    type: "Git"
+    url: "https://github.com/django/django.git"
+    revision: ""
+    path: ""
+- id: "PyPI::pytz:2026.6"
+  purl: "pkg:pypi/pytz@2026.6"
+  authors:
+  - "Stuart Bishop <stuart@stuartbishop.net>"
+  declared_licenses:
+  - "MIT"
+  - "MIT License"
+  declared_licenses_processed:
+    spdx_expression: "MIT"
+    mapped:
+      MIT License: "MIT"
+  description: "World timezone definitions, modern and historical"
+  homepage_url: "http://pythonhosted.org/pytz"
+  binary_artifact:
+    url: "https://files.pythonhosted.org/packages/b6/25/564f3fc5b70c1398d706c51f2b1470d0ea0b1b2f96fee67877b6f5bdf3b6/pytz-2026.6-py2.py3-none-any.whl"
+    hash:
+      value: "7fed3fee8fd6bd4a2b7b75a8d56021d0624127bf69bd5691f115db929ac570b3"
+      algorithm: "SHA-256"
+  source_artifact:
+    url: "https://files.pythonhosted.org/packages/f5/b0/168030b0bfcc334cf09fa3313afdb888d892c8a0027324683d1de0ec277e/pytz-2026.6.tar.gz"
+    hash:
+      value: "3b0fc2727707663d6e517936f444fd8a8b240f1fc32f4bf7ee03274245945284"
+      algorithm: "SHA-256"
+  vcs:
+    type: ""
+    url: ""
+    revision: ""
+    path: ""
+  vcs_processed:
+    type: "Git"
+    url: "https://github.com/stub42/pytz.git"
+    revision: ""
+    path: ""
+- id: "PyPI::sqlparse:0.6.1"
+  purl: "pkg:pypi/sqlparse@0.6.1"
+  authors:
+  - "Andi Albrecht <albrecht.andi@gmail.com>"
+  declared_licenses:
+  - "BSD License"
+  declared_licenses_processed:
+    unmapped:
+    - "BSD License"
+  description: "A non-validating SQL parser."
+  homepage_url: ""
+  binary_artifact:
+    url: "https://files.pythonhosted.org/packages/df/ff/2fee788e82e75be8f210c65c5d103bf44c880e3769c884652a4cd911b8ba/sqlparse-0.6.1-py3-none-any.whl"
+    hash:
+      value: "3be5a72d04c873d690d7c6dedd33d6fae2ef82759881ceec02fc2efd0cba564f"
+      algorithm: "SHA-256"
+  source_artifact:
+    url: "https://files.pythonhosted.org/packages/7e/e0/361c764ea58cc1a75f7b4b424a74b08449db8bfa5e9199c7275999fdd1b9/sqlparse-0.6.1.tar.gz"
+    hash:
+      value: "ca722573f848ff2d30e40ea30f53a104b7dea7635ea9285891263eb2c58fb6e7"
+      algorithm: "SHA-256"
+  vcs:
+    type: ""
+    url: ""
+    revision: ""
+    path: ""
+  vcs_processed:
+    type: "Git"
+    url: "https://github.com/andialbrecht/sqlparse.git"
+    revision: ""
+    path: ""

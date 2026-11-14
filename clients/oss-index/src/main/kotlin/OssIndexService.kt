@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,8 +19,6 @@
 
 package org.ossreviewtoolkit.clients.ossindex
 
-import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
-
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -29,51 +27,54 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 
 import retrofit2.Retrofit
+import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.POST
 
 /**
- * Interface for the OSS Index REST API, based on the documentation from https://ossindex.sonatype.org/rest.
+ * Interface for the OSS Index REST API, based on the documentation from
+ * https://guide.sonatype.com/api#/OSS%20Index%20Compatibility.
  */
 interface OssIndexService {
     companion object {
-        /**
-         * The default base URL for the REST API of the public OSS Index service.
-         */
-        const val DEFAULT_BASE_URL = "https://ossindex.sonatype.org/"
+        /** The default base URL for the REST API of the public OSS Index service. */
+        const val DEFAULT_BASE_URL = "https://api.guide.sonatype.com/"
 
-        /**
-         * The JSON (de-)serialization object used by this service.
-         */
+        /** The JSON (de-)serialization object used by this service. */
         val JSON = Json.Default
 
         /**
-         * Create an OSS Index service instance for communicating with a server running at the given [url], optionally
-         * using [user] and [password] for basic authentication, and / or a pre-built OkHttp [client].
+         * Create an OSS Index service instance for communicating with a server running at the given [url].
+         * Authentication happens either via a Sonatype Guide personal access [token], or OSS Index [username] and
+         * [password][token]. Optionally, a custom HTTP [client] can be used.
          */
         fun create(
-            url: String,
-            user: String? = null,
-            password: String? = null,
+            url: String? = null,
+            username: String? = null,
+            token: String,
             client: OkHttpClient? = null
         ): OssIndexService {
-            val ossIndexClient = (client ?: OkHttpClient()).newBuilder()
-                .addInterceptor { chain ->
-                    val request = chain.request()
-                    val requestBuilder = request.newBuilder()
+            val ossIndexClient = (client?.newBuilder() ?: OkHttpClient.Builder()).addInterceptor { chain ->
+                val request = chain.request()
+                val requestBuilder = request.newBuilder()
 
-                    if (user != null && password != null) {
-                        requestBuilder.header("Authorization", Credentials.basic(user, password))
+                if (username == null) {
+                    require(token.startsWith("sonatype_pat_")) {
+                        "The token is not a valid Sonatype Guide PAT."
                     }
 
-                    chain.proceed(requestBuilder.build())
+                    requestBuilder.header("Authorization", "Bearer $token")
+                } else {
+                    requestBuilder.header("Authorization", Credentials.basic(username, token))
                 }
-                .build()
+
+                chain.proceed(requestBuilder.build())
+            }.build()
 
             val contentType = "application/json".toMediaType()
             val retrofit = Retrofit.Builder()
                 .client(ossIndexClient)
-                .baseUrl(url)
+                .baseUrl(url ?: DEFAULT_BASE_URL)
                 .addConverterFactory(JSON.asConverterFactory(contentType))
                 .build()
 
@@ -81,13 +82,11 @@ interface OssIndexService {
         }
     }
 
-    // See https://ossindex.sonatype.org/rest#model-ComponentReportRequest.
     @Serializable
     data class ComponentReportRequest(
         val coordinates: List<String>
     )
 
-    // See https://ossindex.sonatype.org/rest#model-ComponentReport.
     @Serializable
     data class ComponentReport(
         /** The Package URL coordinates. */
@@ -103,7 +102,6 @@ interface OssIndexService {
         val vulnerabilities: List<Vulnerability>
     )
 
-    // See https://ossindex.sonatype.org/rest#model-ComponentReportVulnerability.
     @Serializable
     data class Vulnerability(
         /** A UUID */
@@ -141,8 +139,9 @@ interface OssIndexService {
     )
 
     /**
-     * Request vulnerability reports for [components].
+     * Request vulnerability reports for [components] (requires basic authentication; rate limits are relaxed).
+     * See https://guide.sonatype.com/api#/OSS%20Index%20Compatibility/getComponentReports_1.
      */
-    @POST("api/v3/component-report")
-    suspend fun getComponentReport(@Body components: ComponentReportRequest): List<ComponentReport>
+    @POST("api/v3/authorized/component-report")
+    suspend fun getAuthorizedComponentReport(@Body components: ComponentReportRequest): List<ComponentReport>
 }

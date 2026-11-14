@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,20 +19,89 @@
 
 package org.ossreviewtoolkit.scanner
 
+import org.ossreviewtoolkit.model.LicenseFinding
 import org.ossreviewtoolkit.model.OrtResult
+import org.ossreviewtoolkit.model.Package
 import org.ossreviewtoolkit.model.PackageType
+import org.ossreviewtoolkit.model.config.Excludes
+import org.ossreviewtoolkit.model.config.Includes
+import org.ossreviewtoolkit.model.config.ScannerConfiguration
+import org.ossreviewtoolkit.model.config.orEmpty
+import org.ossreviewtoolkit.model.config.snippet.SnippetChoices
+import org.ossreviewtoolkit.model.utils.isPathIncluded
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxExpression
 
-/**
- * Additional context information that can be used by a [ScannerWrapper] to alter its behavior.
- */
+/** Additional context information that can be used by a [ScannerWrapper] to alter its behavior. */
 data class ScanContext(
-    /**
-     * A map of key-value pairs, usually from [OrtResult.labels].
-     */
+    /** A map of key-value pairs, usually from [OrtResult.labels]. */
     val labels: Map<String, String>,
 
+    /** The [type][PackageType] of the packages to scan. */
+    val packageType: PackageType,
+
     /**
-     * The [type][PackageType] of the packages to scan.
+     * Relative paths of all directories in the root provenance source tree of the project to scan, to which the root
+     * directory of the provenance corresponding to the scan is checked out to. This should only be set to non-default,
+     * if the [packageType] is [PackageType.PROJECT] and must never be empty, because there always is at least one
+     * checkout path.
      */
-    val packageType: PackageType
-)
+    val checkoutPaths: Set<String> = setOf(""),
+
+    /** The [Excludes] of the project to scan. Only set if [packageType] is [PackageType.PROJECT]. */
+    val excludes: Excludes? = null,
+
+    /** The [Includes] of the project to scan. Only set if [packageType] is [PackageType.PROJECT]. */
+    val includes: Includes? = null,
+
+    /**
+     * The detected license mappings configured in the
+     * [scanner configuration][ScannerConfiguration.detectedLicenseMapping]. Can be used by [ScannerWrapper]
+     * implementations where the scanner can return arbitrary license strings which cannot be parsed as
+     * [SpdxExpression]s and can therefore not be returned as a [LicenseFinding] without being mapped first. Should not
+     * be used by scanners where scan results are stored, because then changes in the mapping would not be applied to
+     * stored results.
+     */
+    val detectedLicenseMapping: Map<String, String> = emptyMap(),
+
+    /**
+     * The packages known to be covered in the context of this scan. For package scanners, this is the list of packages
+     * that have the same provenance as the reference package.
+     */
+    val coveredPackages: List<Package> = emptyList(),
+
+    /** The [SnippetChoices] of the project to scan. Only set if [packageType] is [PackageType.PROJECT]. */
+    val snippetChoices: List<SnippetChoices> = emptyList()
+) {
+    init {
+        require(checkoutPaths.isNotEmpty()) {
+            "The checkout paths must not be empty."
+        }
+
+        val invalidCheckoutPaths = checkoutPaths.filter { it.startsWith("/") || it.endsWith("/") }
+        require(invalidCheckoutPaths.isEmpty()) {
+            "The following checkout paths start or end with a '/' which is not allowed: $invalidCheckoutPaths"
+        }
+    }
+
+    /** Returns true if the given [pathRelativeToProvenanceRoot] is excluded. */
+    fun isPathExcluded(pathRelativeToProvenanceRoot: String): Boolean {
+        // For package scans, includes and excludes should not be set anyway. But return early to be on the safe side.
+        if (packageType != PackageType.PROJECT) return false
+
+        val pathsInRootProvenanceSourceTree = checkoutPaths.map {
+            if (it.isEmpty()) {
+                pathRelativeToProvenanceRoot
+            } else {
+                "${it.removeSuffix("/")}/$pathRelativeToProvenanceRoot"
+            }
+        }
+
+        return pathsInRootProvenanceSourceTree.all { path ->
+            !isPathIncluded(
+                path,
+                excludes.orEmpty(),
+                includes.orEmpty()
+            )
+        }
+    }
+}

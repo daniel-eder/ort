@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,9 @@ import java.io.ByteArrayInputStream
 import java.io.FileNotFoundException
 import java.io.IOException
 
-import org.apache.logging.log4j.kotlin.Logging
+import kotlin.coroutines.cancellation.CancellationException
+
+import org.apache.logging.log4j.kotlin.logger
 
 import org.ossreviewtoolkit.model.RepositoryProvenance
 import org.ossreviewtoolkit.model.yamlMapper
@@ -35,12 +37,10 @@ import org.ossreviewtoolkit.utils.ort.showStackTrace
 import org.ossreviewtoolkit.utils.ort.storage.FileStorage
 
 class FileBasedNestedProvenanceStorage(private val backend: FileStorage) : NestedProvenanceStorage {
-    companion object : Logging
-
-    override fun readNestedProvenance(root: RepositoryProvenance): NestedProvenanceResolutionResult? =
+    override suspend fun readNestedProvenance(root: RepositoryProvenance): NestedProvenanceResolutionResult? =
         readResults(root).find { it.nestedProvenance.root == root }
 
-    private fun readResults(root: RepositoryProvenance): List<NestedProvenanceResolutionResult> {
+    private suspend fun readResults(root: RepositoryProvenance): List<NestedProvenanceResolutionResult> {
         val path = storagePath(root)
 
         return runCatching {
@@ -49,14 +49,17 @@ class FileBasedNestedProvenanceStorage(private val backend: FileStorage) : Neste
             }
         }.getOrElse {
             when (it) {
+                is CancellationException -> throw it
+
                 is FileNotFoundException -> {
                     // If the file cannot be found it means no scan results have been stored, yet.
                     emptyList()
                 }
+
                 else -> {
                     logger.info {
                         "Could not read resolved nested provenances for '$root' from path '$path': " +
-                                it.collectMessages()
+                            it.collectMessages()
                     }
 
                     emptyList()
@@ -65,7 +68,7 @@ class FileBasedNestedProvenanceStorage(private val backend: FileStorage) : Neste
         }
     }
 
-    override fun putNestedProvenance(root: RepositoryProvenance, result: NestedProvenanceResolutionResult) {
+    override suspend fun writeNestedProvenance(root: RepositoryProvenance, result: NestedProvenanceResolutionResult) {
         val results = readResults(root).toMutableList()
         results.removeAll { it.nestedProvenance.root == root }
         results += result
@@ -79,14 +82,17 @@ class FileBasedNestedProvenanceStorage(private val backend: FileStorage) : Neste
             logger.debug { "Stored resolved nested provenance for '$root' at path '$path'." }
         }.onFailure {
             when (it) {
+                is CancellationException -> throw it
+
                 is IllegalArgumentException, is IOException -> {
                     it.showStackTrace()
 
                     logger.warn {
                         "Could not store resolved nested provenance for '$root' at path '$path': " +
-                                it.collectMessages()
+                            it.collectMessages()
                     }
                 }
+
                 else -> throw it
             }
         }
@@ -97,6 +103,6 @@ private const val FILE_NAME = "resolved_nested_provenance.yml"
 
 private fun storagePath(root: RepositoryProvenance) =
     "${root.vcsInfo.type.toString().fileSystemEncode()}/" +
-            "${root.vcsInfo.url.fileSystemEncode()}/" +
-            "${root.resolvedRevision.fileSystemEncode()}/" +
-            FILE_NAME
+        "${root.vcsInfo.url.fileSystemEncode()}/" +
+        "${root.resolvedRevision.fileSystemEncode()}/" +
+        FILE_NAME

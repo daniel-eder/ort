@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,15 +21,11 @@ package org.ossreviewtoolkit.utils.common
 
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.WordSpec
-import io.kotest.extensions.system.SpecSystemExitListener
-import io.kotest.extensions.system.SystemExitException
 import io.kotest.matchers.shouldBe
 
 import java.util.Scanner
 
 class RedirectionTest : WordSpec({
-    register(SpecSystemExitListener)
-
     "Redirecting output" should {
         // Use a relatively large number of lines that results in more than 64k to be written to test against the pipe
         // buffer limit on Linux, see https://unix.stackexchange.com/a/11954/53328.
@@ -40,9 +36,10 @@ class RedirectionTest : WordSpec({
                 for (i in 1..numberOfLines) System.out.println("stdout: $i")
             }
 
-            // The last printed line has a newline, resulting in a trailing blank line.
-            val stdoutLines = stdout.lines().dropLast(1)
+            // The last printed line has a newline, resulting in a trailing empty line.
+            val stdoutLines = stdout.lines().dropLastWhile { it.isEmpty() }
             stdoutLines.size shouldBe numberOfLines
+            stdoutLines.first() shouldBe "stdout: 1"
             stdoutLines.last() shouldBe "stdout: $numberOfLines"
         }
 
@@ -51,9 +48,10 @@ class RedirectionTest : WordSpec({
                 for (i in 1..numberOfLines) System.err.println("stderr: $i")
             }
 
-            // The last printed line has a newline, resulting in a trailing blank line.
-            val stderrLines = stderr.lines().dropLast(1)
+            // The last printed line has a newline, resulting in a trailing empty line.
+            val stderrLines = stderr.lines().dropLastWhile { it.isEmpty() }
             stderrLines.size shouldBe numberOfLines
+            stderrLines.first() shouldBe "stderr: 1"
             stderrLines.last() shouldBe "stderr: $numberOfLines"
         }
 
@@ -68,33 +66,17 @@ class RedirectionTest : WordSpec({
                 }
             }
 
-            // The last printed line has a newline, resulting in a trailing blank line.
-            val stdoutLines = stdout.lines().dropLast(1)
+            // The last printed line has a newline, resulting in a trailing empty line.
+            val stdoutLines = stdout.lines().dropLastWhile { it.isEmpty() }
             stdoutLines.size shouldBe numberOfLines
+            stdoutLines.first() shouldBe "stdout: 1"
             stdoutLines.last() shouldBe "stdout: $numberOfLines"
 
-            // The last printed line has a newline, resulting in a trailing blank line.
-            val stderrLines = stderr.lines().dropLast(1)
+            // The last printed line has a newline, resulting in a trailing empty line.
+            val stderrLines = stderr.lines().dropLastWhile { it.isEmpty() }
             stderrLines.size shouldBe numberOfLines
+            stderrLines.first() shouldBe "stderr: 1"
             stderrLines.last() shouldBe "stderr: $numberOfLines"
-        }
-
-        "work when trapping exit calls" {
-            var e: SystemExitException? = null
-
-            val stdout = redirectStdout {
-                e = shouldThrow {
-                    for (i in 1..numberOfLines) System.out.println("stdout: $i")
-                    System.exit(42)
-                }
-            }
-
-            e?.exitCode shouldBe 42
-
-            // The last printed line has a newline, resulting in a trailing blank line.
-            val stdoutLines = stdout.lines().dropLast(1)
-            stdoutLines.size shouldBe numberOfLines
-            stdoutLines.last() shouldBe "stdout: $numberOfLines"
         }
     }
 

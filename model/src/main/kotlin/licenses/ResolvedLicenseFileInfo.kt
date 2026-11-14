@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,28 +26,18 @@ import org.ossreviewtoolkit.model.Provenance
 import org.ossreviewtoolkit.model.config.PathExclude
 import org.ossreviewtoolkit.utils.ort.CopyrightStatementsProcessor
 
-/**
- * Information about license files of a package and the licenses detected in those files.
- */
+/** Information about license files of a package and the licenses detected in those files. */
 data class ResolvedLicenseFileInfo(
-    /**
-     * The identifier of the package.
-     */
+    /** The identifier of the package. */
     val id: Identifier,
 
-    /**
-     * The resolved license files.
-     */
+    /** The resolved license files. */
     val files: List<ResolvedLicenseFile>
 )
 
-/**
- * Information about a single resolved license file.
- */
+/** Information about a single resolved license file. */
 data class ResolvedLicenseFile(
-    /**
-     * The [Provenance] of the license file.
-     */
+    /** The [Provenance] of the license file. */
     val provenance: Provenance,
 
     /**
@@ -56,14 +46,10 @@ data class ResolvedLicenseFile(
      */
     val licenses: List<ResolvedLicense>,
 
-    /**
-     *  The path of the license file relative to the [provenance].
-     */
+    /** The path of the license file relative to the [provenance]. */
     val path: String,
 
-    /**
-     * The unarchived license file.
-     */
+    /** The unarchived license file. */
     val file: File
 ) {
     /**
@@ -75,8 +61,6 @@ data class ResolvedLicenseFile(
     fun getCopyrights(process: Boolean = true, omitExcluded: Boolean = true): Set<String> =
         licenses.flatMapTo(mutableSetOf()) { it.getCopyrights(process, omitExcluded) }
 
-    /**
-     * The textual content of the [license file][file].
-     */
+    /** The textual content of the [license file][file]. */
     val text by lazy { file.readText() }
 }

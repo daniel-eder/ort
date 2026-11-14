@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,21 +19,19 @@
 
 package org.ossreviewtoolkit.utils.ort
 
-import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.annotation.JsonInclude
+import com.fasterxml.jackson.annotation.JsonPropertyOrder
+import com.fasterxml.jackson.databind.annotation.JsonSerialize
 
-import org.apache.logging.log4j.kotlin.Logging
-
-import org.ossreviewtoolkit.utils.common.collectMessages
 import org.ossreviewtoolkit.utils.common.unquote
-import org.ossreviewtoolkit.utils.spdx.SpdxCompoundExpression
 import org.ossreviewtoolkit.utils.spdx.SpdxConstants
-import org.ossreviewtoolkit.utils.spdx.SpdxDeclaredLicenseMapping
-import org.ossreviewtoolkit.utils.spdx.SpdxExpression
-import org.ossreviewtoolkit.utils.spdx.SpdxOperator
-import org.ossreviewtoolkit.utils.spdx.toSpdx
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxCompoundExpression
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxDeclaredLicenseMapper
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxExpression
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxOperator
+import org.ossreviewtoolkit.utils.spdxexpression.toSpdxOrNull
 
-object DeclaredLicenseProcessor : Logging {
+object DeclaredLicenseProcessor {
     private val urlPrefixesToRemove = listOf(
         "choosealicense.com/licenses/",
         "gnu.org/licenses/old-licenses/",
@@ -78,20 +76,22 @@ object DeclaredLicenseProcessor : Logging {
      * it as something that is not a license, like a copyright that was accidentally entered as a license. Return the
      * successfully mapped license expression, or null if the declared license could not be mapped.
      */
-    internal fun process(
+    fun process(
         declaredLicense: String,
         customLicenseMapping: Map<String, SpdxExpression> = emptyMap()
     ): SpdxExpression? {
         val strippedLicense = stripUrlSurroundings(declaredLicense)
-
+        val declaredLicenseMapper = SpdxDeclaredLicenseMapper.getInstance()
         val mappedLicense = customLicenseMapping[strippedLicense]
             // When looking up built-in mappings, try some variations of the license name.
-            ?: SpdxDeclaredLicenseMapping.map(strippedLicense)
-            ?: SpdxDeclaredLicenseMapping.map(strippedLicense.unquote())
-            ?: SpdxDeclaredLicenseMapping.map(strippedLicense.removePrefix(SpdxConstants.TAG).trim())
-            ?: parseLicense(strippedLicense)
+            ?: declaredLicenseMapper.map(strippedLicense)
+            ?: declaredLicenseMapper.map(strippedLicense.unquote())
+            ?: declaredLicenseMapper.map(strippedLicense.removePrefix(SpdxConstants.TAG).trim())
 
-        return mappedLicense?.normalize()?.takeIf { it.isValid() || it.toString() == SpdxConstants.NONE }
+        val processedLicense = mappedLicense ?: strippedLicense.toSpdxOrNull()
+        return processedLicense?.normalize()?.takeIf {
+            it.isValid(SpdxExpression.Strictness.ALLOW_LICENSEREF_EXCEPTIONS) || it.toString() == SpdxConstants.NONE
+        }
     }
 
     /**
@@ -108,7 +108,7 @@ object DeclaredLicenseProcessor : Logging {
         operator: SpdxOperator = SpdxOperator.AND
     ): ProcessedDeclaredLicense {
         val processedLicenses = mutableMapOf<String, SpdxExpression>()
-        val unmapped = mutableListOf<String>()
+        val unmapped = mutableSetOf<String>()
 
         declaredLicenses.forEach { declaredLicense ->
             process(declaredLicense, customLicenseMapping)?.let {
@@ -130,20 +130,12 @@ object DeclaredLicenseProcessor : Logging {
 
         return ProcessedDeclaredLicense(spdxExpression, mapped, unmapped)
     }
-
-    private fun parseLicense(declaredLicense: String) =
-        runCatching {
-            declaredLicense.toSpdx()
-        }.onFailure {
-            logger.debug { "Could not parse declared license '$declaredLicense': ${it.collectMessages()}" }
-        }.getOrNull()
 }
 
 data class ProcessedDeclaredLicense(
-    /**
-     * The resulting SPDX expression, or null if no license could be mapped.
-     */
+    /** The resulting SPDX expression, or null if no license could be mapped. */
     @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonSerialize(converter = SpdxExpressionSortedConverter::class)
     val spdxExpression: SpdxExpression?,
 
     /**
@@ -151,26 +143,23 @@ data class ProcessedDeclaredLicense(
      * declared license string and the processed declared license are identical they are not contained in this map.
      */
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    @JsonPropertyOrder(alphabetic = true)
     val mapped: Map<String, SpdxExpression> = emptyMap(),
 
-    /**
-     * Declared licenses that could not be mapped to an SPDX expression.
-     */
+    /** Declared licenses that could not be mapped to an SPDX expression. */
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
-    val unmapped: List<String> = emptyList()
+    @JsonSerialize(converter = StringSortedSetConverter::class)
+    val unmapped: Set<String> = emptySet()
 ) {
     companion object {
         @JvmField
         val EMPTY = ProcessedDeclaredLicense(
             spdxExpression = null,
             mapped = emptyMap(),
-            unmapped = emptyList()
+            unmapped = emptySet()
         )
     }
 
-    /**
-     * The list of all mapped and unmapped licenses.
-     */
-    @JsonIgnore
-    val allLicenses = spdxExpression?.decompose().orEmpty().map { it.toString() } + unmapped
+    /** [Decompose][SpdxExpression.decompose] the [spdxExpression] or return an empty string if it is null. */
+    fun decompose() = spdxExpression?.decompose().orEmpty()
 }

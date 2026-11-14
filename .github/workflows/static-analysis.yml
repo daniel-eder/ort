@@ -8,79 +8,139 @@ on:
     branches:
       - main
 
+env:
+  GRADLE_OPTS: -Dorg.gradle.daemon=false -Dorg.gradle.logging.stacktrace=all
+
 jobs:
-  copyright-license:
-    runs-on: ubuntu-22.04
-    env:
-      GRADLE_OPTS: -Dorg.gradle.daemon=false
+  commit-lint:
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Check Commit Messages
+        uses: wagoid/commitlint-github-action@b948419dd99f3fd78a6548d48f94e3df7f6bf3ed # v6.2.1
+        with:
+          configFile: .commitlintrc.yml
+  code-base-checks:
+    runs-on: ubuntu-26.04
     steps:
     - name: Checkout Repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+    - name: Check copyrights, license headers, and .gitattributes
+      run: ./gradlew --continue checkCopyrightsInNoticeFile checkLicenseHeaders checkGitAttributes
+  completions:
+    runs-on: ubuntu-26.04
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
     - name: Setup Java
-      uses: actions/setup-java@v3
+      uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6.3.0
       with:
         distribution: temurin
-        java-version: 11
-    - name: Check copyright and license information
-      uses: gradle/gradle-build-action@v2
-      with:
-        arguments: checkCopyrightsInNoticeFile checkLicenseHeaders
+        java-version: 25
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+    - name: Generate completions
+      run: |
+        ./scripts/generate_completion_scripts.sh
+    - name: Check if completions are up-to-date
+      run: |
+        if git diff --exit-code; then
+          echo "Completions are up-to-date."
+        else
+          echo "Completions are not up-to-date."
+          echo "Please always run the script below when changing CLI commands:"
+          echo "./scripts/generate_completion_scripts.sh"
+          exit 1
+        fi
+  build-health:
+    runs-on: ubuntu-26.04
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
+    - name: Check Build Health
+      run: ./gradlew --continue buildHealth checkSortDependencies
   detekt-issues:
-    runs-on: ubuntu-22.04
-    env:
-      GRADLE_OPTS: -Dorg.gradle.daemon=false
+    runs-on: ubuntu-26.04
+    permissions:
+      # Needed for SARIF scanning upload.
+      security-events: write
     steps:
     - name: Checkout Repository
-      uses: actions/checkout@v3
-    - name: Setup Java
-      uses: actions/setup-java@v3
-      with:
-        distribution: temurin
-        java-version: 11
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6.4.1
     - name: Check for Detekt Issues
-      uses: gradle/gradle-build-action@v2
-      with:
-        arguments: detekt detektTest
+      run: ./gradlew --continue detekt
+    - name: Check for Detekt Issues with type resolution
+      run: ./gradlew --continue detektMain detektTestFixtures detektTest detektFunTest
+      if: always() # Run even if the previous step failed.
+    - name: Merge SARIF files
+      run: ./gradlew mergeDetektReports
+      if: always() # Merge even if previous steps failed.
     - name: Upload SARIF File
-      uses: github/codeql-action/upload-sarif@v2
-      if: ${{ always() }} # Upload even if the previous step failed.
+      uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+      if: always() # Upload even if previous steps failed.
       with:
         sarif_file: build/reports/detekt/merged.sarif
   markdown-links:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-26.04
+    permissions:
+      checks: write
+      contents: read
     steps:
     - name: Checkout Repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
     - name: Check Links
-      uses: gaurav-nelson/github-action-markdown-link-check@v1
+      uses: umbrelladocs/action-linkspector@568ec8d29fa92b31fd9ea5381e155c51e922af83 # v1.5.5
       with:
-        base-branch: main
-        check-modified-files-only: yes
-        max-depth: 2
-        use-quiet-mode: yes
-  qodana-scan:
-    runs-on: ubuntu-22.04
+        fail_level: error
+  markdownlint:
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Setup Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - name: Check for Markdown issues
+        run: |
+          npm install -g markdownlint-rule-max-one-sentence-per-line@0.0.2
+          npx markdownlint-cli2
+  prettier-website:
+    runs-on: ubuntu-26.04
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+        working-directory: website
+      - name: Run Prettier
+        run: npm run format:check
+        working-directory: website
+  renovate-validation:
+    runs-on: ubuntu-26.04
     steps:
     - name: Checkout Repository
-      uses: actions/checkout@v3
-      with:
-        fetch-depth: 0
-    - name: Qodana Scan
-      uses: JetBrains/qodana-action@v2022.2.3
-    - uses: github/codeql-action/upload-sarif@v2
-      with:
-        sarif_file: ${{runner.temp}}/qodana/results/qodana.sarif.json
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+    - name: Validate Renovate Config
+      run: npx -y --package renovate@latest -- renovate-config-validator renovate.json
   reuse-tool:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-26.04
     steps:
     - name: Checkout Repository
-      uses: actions/checkout@v3
-    - name: Setup Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: "3.10"
-        cache: pip
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
     - name: Check REUSE Compliance
-      run: |
-        pip install --user reuse
-        ~/.local/bin/reuse lint
+      uses: fsfe/reuse-action@676e2d560c9a403aa252096d99fcab3e1132b0f5 # v6

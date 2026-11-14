@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,9 +26,7 @@ import com.fasterxml.jackson.databind.annotation.JsonDeserialize
 import com.fasterxml.jackson.databind.deser.std.StdDeserializer
 import com.fasterxml.jackson.module.kotlin.treeToValue
 
-/**
- * Provenance information about the origin of source code.
- */
+/** Provenance information about the origin of source code. */
 @JsonDeserialize(using = ProvenanceDeserializer::class)
 sealed interface Provenance {
     /**
@@ -37,52 +35,45 @@ sealed interface Provenance {
     fun matches(pkg: Package): Boolean
 }
 
-object UnknownProvenance : Provenance {
+data object UnknownProvenance : Provenance {
     override fun matches(pkg: Package): Boolean = false
 }
 
 sealed interface KnownProvenance : Provenance
 
-/**
- * Provenance information for a source artifact.
- */
+sealed interface RemoteProvenance : KnownProvenance
+
+/** Provenance information for a source artifact. */
 data class ArtifactProvenance(
-    /**
-     * The source artifact that was downloaded.
-     */
+    /** The source artifact that was downloaded. */
     val sourceArtifact: RemoteArtifact
-) : KnownProvenance {
+) : RemoteProvenance {
     override fun matches(pkg: Package): Boolean = sourceArtifact == pkg.sourceArtifact
 }
 
-/**
- * Provenance information for a Version Control System location.
- */
+/** Provenance information for a Version Control System location. */
 data class RepositoryProvenance(
     /**
-     * The VCS repository that was downloaded.
+     * The VCS information that was used for [resolving the revision][resolvedRevision]. It potentially still contains
+     * an unresolved "moving" VCS revision (e.g. a branch or tag name).
      */
     val vcsInfo: VcsInfo,
 
     /**
-     * The VCS revision of the source code that was downloaded, resolved from [vcsInfo] during download. Must not be
-     * blank, and must also be fixed revision, e.g. the SHA1 of a Git commit instead of a branch or tag name.
+     * The VCS revision resolved from [VCS information][vcsInfo]. It must neither be blank nor a "moving" VCS revision
+     * like a branch or tag name, but a fixed revision (e.g. the SHA1 of a Git commit).
      */
     val resolvedRevision: String
-) : KnownProvenance {
+) : RemoteProvenance {
     init {
         require(resolvedRevision.isNotBlank()) { "The resolved revision must not be blank." }
     }
 
-    /**
-     * Return true if this provenance matches the processed VCS information of the [package][pkg].
-     */
+    /** Return true if this provenance matches the processed VCS information of the [package][pkg]. */
     override fun matches(pkg: Package): Boolean = vcsInfo == pkg.vcsProcessed
 }
 
-/**
- * A custom deserializer for polymorphic deserialization of [Provenance] without requiring type information.
- */
+/** A custom deserializer for polymorphic deserialization of [Provenance] without requiring type information. */
 private class ProvenanceDeserializer : StdDeserializer<Provenance>(Provenance::class.java) {
     override fun deserialize(p: JsonParser, ctxt: DeserializationContext): Provenance {
         val node = p.codec.readTree<JsonNode>(p)
@@ -91,12 +82,14 @@ private class ProvenanceDeserializer : StdDeserializer<Provenance>(Provenance::c
                 val sourceArtifact = jsonMapper.treeToValue<RemoteArtifact>(node["source_artifact"])
                 ArtifactProvenance(sourceArtifact)
             }
+
             node.has("vcs_info") -> {
                 val vcsInfo = jsonMapper.treeToValue<VcsInfo>(node["vcs_info"])
                 // For backward compatibility, if there is no resolved_revision use the revision from vcsInfo.
                 val resolvedRevision = node["resolved_revision"]?.textValue() ?: vcsInfo.revision
                 RepositoryProvenance(vcsInfo, resolvedRevision)
             }
+
             else -> UnknownProvenance
         }
     }

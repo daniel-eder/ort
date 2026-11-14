@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,9 +19,7 @@
 
 package org.ossreviewtoolkit.model.config
 
-/**
- * Possible reasons for excluding a path.
- */
+/** Possible reasons for excluding a path. */
 enum class PathExcludeReason {
     /**
      * The path only contains tools used for building source code which are not included in distributed build
@@ -35,14 +33,10 @@ enum class PathExcludeReason {
      */
     DATA_FILE_OF,
 
-    /**
-     * The path only contains documentation which is not included in distributed build artifacts.
-     */
+    /** The path only contains documentation which is not included in distributed build artifacts. */
     DOCUMENTATION_OF,
 
-    /**
-     * The path only contains source code examples which are not included in distributed build artifacts.
-     */
+    /** The path only contains source code examples which are not included in distributed build artifacts. */
     EXAMPLE_OF,
 
     /**
@@ -51,9 +45,7 @@ enum class PathExcludeReason {
      */
     OPTIONAL_COMPONENT_OF,
 
-    /**
-     * Any other reason which cannot be represented by any other element of [PathExcludeReason].
-     */
+    /** A fallback reason for the [PathExcludeReason] when none of the other reasons apply. */
     OTHER,
 
     /**

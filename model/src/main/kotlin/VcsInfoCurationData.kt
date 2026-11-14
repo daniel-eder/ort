@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,24 +21,16 @@ package org.ossreviewtoolkit.model
 
 import com.fasterxml.jackson.annotation.JsonInclude
 
-/**
- * Bundles curation data for Version Control System information.
- */
+/** Bundles curation data for Version Control System information. */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class VcsInfoCurationData(
-    /**
-     * The type of the VCS, for example Git, GitRepo, Mercurial, etc.
-     */
+    /** The type of the VCS, for example Git, GitRepo, Mercurial, etc. */
     val type: VcsType? = null,
 
-    /**
-     * The URL to the VCS repository.
-     */
+    /** The URL to the VCS repository. */
     val url: String? = null,
 
-    /**
-     * The VCS-specific revision (tag, branch, SHA1) that the version of the package maps to.
-     */
+    /** The VCS-specific revision (tag, branch, SHA1) that the version of the package maps to. */
     val revision: String? = null,
 
     /**

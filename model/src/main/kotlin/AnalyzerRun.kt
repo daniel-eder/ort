@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,39 +24,25 @@ import java.time.Instant
 import org.ossreviewtoolkit.model.config.AnalyzerConfiguration
 import org.ossreviewtoolkit.utils.ort.Environment
 
-/**
- * The summary of a single run of the analyzer.
- */
+/** The summary of a single run of the analyzer. */
 data class AnalyzerRun(
-    /**
-     * The [Instant] the analyzer was started..
-     */
+    /** The [Instant] the analyzer was started. */
     val startTime: Instant,
 
-    /**
-     * The [Instant] the analyzer has finished.
-     */
+    /** The [Instant] the analyzer has finished. */
     val endTime: Instant,
 
-    /**
-     * The [Environment] in which the analyzer was executed.
-     */
+    /** The [Environment] in which the analyzer was executed. */
     val environment: Environment,
 
-    /**
-     * The [AnalyzerConfiguration] used for this run.
-     */
+    /** The [AnalyzerConfiguration] used for this run. */
     val config: AnalyzerConfiguration,
 
-    /**
-     * The result of this run.
-     */
+    /** The result of this run. */
     val result: AnalyzerResult
 ) {
     companion object {
-        /**
-         * A constant for an [AnalyzerRun] where all properties are empty.
-         */
+        /** A constant for an [AnalyzerRun] where all properties are empty. */
         @JvmField
         val EMPTY = AnalyzerRun(
             startTime = Instant.EPOCH,

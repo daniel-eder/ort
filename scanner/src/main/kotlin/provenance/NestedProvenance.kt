@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,13 +25,9 @@ import org.ossreviewtoolkit.model.ArtifactProvenance
 import org.ossreviewtoolkit.model.KnownProvenance
 import org.ossreviewtoolkit.model.RepositoryProvenance
 
-/**
- * This class contains information about a [root] provenance and all nested [subRepositories].
- */
+/** This class contains information about a [root] provenance and all nested [subRepositories]. */
 data class NestedProvenance(
-    /**
-     * The root provenance that contains the [nested provenances][subRepositories].
-     */
+    /** The root provenance that contains the [nested provenances][subRepositories]. */
     val root: KnownProvenance,
 
     /**
@@ -41,6 +37,14 @@ data class NestedProvenance(
      */
     val subRepositories: Map<String, RepositoryProvenance>
 ) {
+    /** The set of all contained [KnownProvenance]s. */
+    @JsonIgnore
+    val allProvenances: Set<KnownProvenance> =
+        buildSet {
+            add(root)
+            addAll(subRepositories.values)
+        }
+
     /**
      * Return path of the provided [provenance] within this [NestedProvenance]. Throws an [IllegalArgumentException] if
      * the provided [provenance] cannot be found.
@@ -52,14 +56,4 @@ data class NestedProvenance(
 
         throw IllegalArgumentException("Could not find entry for $provenance.")
     }
-
-    /**
-     * Return a set of all contained [KnownProvenance]s.
-     */
-    @JsonIgnore
-    fun getProvenances(): Set<KnownProvenance> =
-        buildSet {
-            add(root)
-            addAll(subRepositories.values)
-        }
 }

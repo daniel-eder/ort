@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,30 +23,27 @@ import org.ossreviewtoolkit.model.CopyrightFinding
 import org.ossreviewtoolkit.model.Identifier
 import org.ossreviewtoolkit.model.LicenseSource
 import org.ossreviewtoolkit.model.Provenance
+import org.ossreviewtoolkit.model.RepositoryProvenance
 import org.ossreviewtoolkit.model.config.CopyrightGarbage
+import org.ossreviewtoolkit.model.config.LicenseFilePatterns
 import org.ossreviewtoolkit.model.config.PathExclude
+import org.ossreviewtoolkit.model.utils.PathLicenseMatcher
 import org.ossreviewtoolkit.utils.ort.CopyrightStatementsProcessor
-import org.ossreviewtoolkit.utils.spdx.SpdxExpression
-import org.ossreviewtoolkit.utils.spdx.SpdxSingleLicenseExpression
-import org.ossreviewtoolkit.utils.spdx.model.SpdxLicenseChoice
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxExpression
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxLicenseChoice
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxOperator
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxSingleLicenseExpression
+import org.ossreviewtoolkit.utils.spdxexpression.toExpression
 
-/**
- * Resolved license information about a package (or project).
- */
+/** Resolved license information about a package (or project). */
 data class ResolvedLicenseInfo(
-    /**
-     * The identifier of the package (or project).
-     */
+    /** The identifier of the package (or project). */
     val id: Identifier,
 
-    /**
-     * The unresolved license info.
-     */
+    /** The unresolved license info. */
     val licenseInfo: LicenseInfo,
 
-    /**
-     * The list of [ResolvedLicense]s for this package (or project).
-     */
+    /** The list of [ResolvedLicense]s for this package (or project). */
     val licenses: List<ResolvedLicense>,
 
     /**
@@ -59,26 +56,77 @@ data class ResolvedLicenseInfo(
      * All copyright findings that could not be matched to a license finding, mapped to the [Provenance] where they were
      * detected.
      */
-    val unmatchedCopyrights: Map<Provenance, Set<CopyrightFinding>>
+    val unmatchedCopyrights: Map<Provenance, Set<ResolvedCopyrightFinding>>
 ) : Iterable<ResolvedLicense> by licenses {
     operator fun get(license: SpdxSingleLicenseExpression): ResolvedLicense? = find { it.license == license }
 
     /**
-     * Return the effective [SpdxExpression] of this [ResolvedLicenseInfo] based on their [licenses] filtered by the
-     * [licenseView] and the applied [licenseChoices]. Effective, in this context, refers to an [SpdxExpression] that
-     * can be used as a final license of this [ResolvedLicenseInfo]. [licenseChoices] will be applied in the order they
-     * are given to the function.
+     * Map all original resolved license expressions to a single expression with top-level [operator]s, or return null
+     * if there are no licenses.
      */
-    fun effectiveLicense(licenseView: LicenseView, vararg licenseChoices: List<SpdxLicenseChoice>): SpdxExpression? {
-        val resolvedLicenseInfo = filter(licenseView, filterSources = true)
-
-        return resolvedLicenseInfo.licenses.flatMap { resolvedLicense ->
+    fun toExpression(operator: SpdxOperator = SpdxOperator.AND): SpdxExpression? =
+        licenses.flatMapTo(mutableSetOf()) { resolvedLicense ->
             resolvedLicense.originalExpressions.map { it.expression }
-        }.toSet()
-            .reduceOrNull(SpdxExpression::and)
-            ?.applyChoices(licenseChoices.asList().flatten())
-            ?.validChoices()
-            ?.reduceOrNull(SpdxExpression::or)
+        }.toExpression(operator)
+
+    /**
+     * Return the main license of a package (or project) as an [SpdxExpression], or null if there is no main license.
+     * The main license is the conjunction of the declared license of the package (or project) and the licenses detected
+     * in any of the configured [LicenseFilePatterns] matched against the root path of the package (or project).
+     */
+    fun mainLicense(): SpdxExpression? {
+        val matcher = PathLicenseMatcher(LicenseFilePatterns.getInstance())
+        val licensePaths = flatMap { resolvedLicense ->
+            resolvedLicense.locations.map { it.location.path }
+        }
+
+        val applicablePathsCache = mutableMapOf<String, Map<String, Set<String>>>()
+        val detectedLicenses = filterTo(mutableSetOf()) { resolvedLicense ->
+            resolvedLicense.locations.any {
+                val rootPath = (it.provenance as? RepositoryProvenance)?.vcsInfo?.path.orEmpty()
+
+                val applicableLicensePaths = applicablePathsCache.getOrPut(rootPath) {
+                    matcher.getApplicableLicenseFilesForDirectories(
+                        licensePaths,
+                        listOf(rootPath)
+                    )
+                }
+
+                val applicableLicenseFiles = applicableLicensePaths[rootPath].orEmpty()
+
+                it.location.path in applicableLicenseFiles
+            }
+        }
+
+        val declaredLicenses = filter(LicenseView.ONLY_DECLARED)
+        val mainLicenses = (detectedLicenses + declaredLicenses.licenses)
+            .flatMap { it.originalExpressions }
+            .map { it.expression }
+
+        return mainLicenses.toExpression()
+    }
+
+    /** Convenience function which returns the first coordinate from [effectiveLicenseAndAppliedChoices]. */
+    fun effectiveLicense(licenseView: LicenseView, vararg licenseChoices: List<SpdxLicenseChoice>): SpdxExpression? =
+        effectiveLicenseAndAppliedChoices(licenseView, *licenseChoices).first
+
+    /**
+     * Return the effective [SpdxExpression] of this [ResolvedLicenseInfo] based on their [licenses] filtered by the
+     * [licenseView] and the applied [licenseChoices] along with applied choices in the order they have been applied.
+     * Effective, in this context, refers to an [SpdxExpression] that can be used as a final license of this
+     * [ResolvedLicenseInfo]. [licenseChoices] will be applied in the order they are given to the function.
+     */
+    fun effectiveLicenseAndAppliedChoices(
+        licenseView: LicenseView,
+        vararg licenseChoices: List<SpdxLicenseChoice>
+    ): Pair<SpdxExpression?, List<SpdxLicenseChoice>> {
+        val resolvedLicenseInfo = filter(licenseView, filterSources = true)
+        val resolvedLicenses = resolvedLicenseInfo.toExpression() ?: return null to emptyList()
+        val choices = licenseChoices.asList().flatten().takeUnless { it.isEmpty() }
+            ?: return resolvedLicenses to emptyList()
+
+        val (expression, appliedChoices) = resolvedLicenses.applyAndGetChoices(choices)
+        return expression.validChoices().toExpression(SpdxOperator.OR) to appliedChoices
     }
 
     /**
@@ -96,15 +144,11 @@ data class ResolvedLicenseInfo(
             ?: CopyrightStatementsProcessor.process(copyrightStatements).allStatements
     }
 
-    /**
-     * Call [LicenseView.filter] on this [ResolvedLicenseInfo].
-     */
+    /** Call [LicenseView.filter] on this [ResolvedLicenseInfo]. */
     @JvmOverloads
     fun filter(licenseView: LicenseView, filterSources: Boolean = false) = licenseView.filter(this, filterSources)
 
-    /**
-     * Filter all licenses that have a location matching [provenance] and [path].
-     */
+    /** Filter all licenses that have a location matching [provenance] and [path]. */
     fun filter(provenance: Provenance, path: String): List<ResolvedLicense> =
         filter { resolvedLicense ->
             resolvedLicense.locations.any {
@@ -112,9 +156,7 @@ data class ResolvedLicenseInfo(
             }
         }
 
-    /**
-     * Apply [licenseChoices] on the effective license of the [licenseView].
-     */
+    /** Apply [licenseChoices] on the effective license of the [licenseView]. */
     fun applyChoices(
         licenseChoices: List<SpdxLicenseChoice>,
         licenseView: LicenseView = LicenseView.ALL
@@ -144,6 +186,6 @@ data class ResolvedLicenseInfo(
  */
 fun List<ResolvedLicense>.filterExcluded() =
     mapNotNull { it.filterExcludedOriginalExpressions() }.filter { resolvedLicense ->
-        resolvedLicense.sources != setOf(LicenseSource.DETECTED) ||
-                resolvedLicense.locations.any { it.matchingPathExcludes.isEmpty() }
+        resolvedLicense.sources.singleOrNull() != LicenseSource.DETECTED ||
+            resolvedLicense.locations.any { it.matchingPathExcludes.isEmpty() }
     }.map { it.filterExcludedCopyrights() }

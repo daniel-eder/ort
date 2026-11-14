@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,37 +27,36 @@ import io.kotest.matchers.collections.beEmpty
 import io.kotest.matchers.collections.containExactly
 import io.kotest.matchers.maps.beEmpty as beEmptyMap
 import io.kotest.matchers.maps.containExactly as containExactlyEntries
-import io.kotest.matchers.maps.shouldContainExactly
 import io.kotest.matchers.nulls.beNull
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.should
 import io.kotest.matchers.shouldBe
-import io.kotest.matchers.shouldNotBe
 
 import org.ossreviewtoolkit.utils.spdx.SpdxConstants
-import org.ossreviewtoolkit.utils.spdx.SpdxDeclaredLicenseMapping
-import org.ossreviewtoolkit.utils.spdx.SpdxException
-import org.ossreviewtoolkit.utils.spdx.SpdxExpression
 import org.ossreviewtoolkit.utils.spdx.SpdxLicense
-import org.ossreviewtoolkit.utils.spdx.SpdxLicenseIdExpression
-import org.ossreviewtoolkit.utils.spdx.SpdxSimpleLicenseMapping
-import org.ossreviewtoolkit.utils.spdx.toExpression
-import org.ossreviewtoolkit.utils.spdx.toSpdx
-import org.ossreviewtoolkit.utils.test.shouldNotBeNull
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxDeclaredLicenseMapper
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxException
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxExpression
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxLicenseIdExpression
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxSimpleLicenseMapper
+import org.ossreviewtoolkit.utils.spdxexpression.toExpression
+import org.ossreviewtoolkit.utils.spdxexpression.toSpdx
 
 class DeclaredLicenseProcessorTest : StringSpec() {
-    /**
-     * A collection of declared license strings found in open source packages.
-     */
-    private val declaredLicenses = SpdxSimpleLicenseMapping.mapping.keys + SpdxDeclaredLicenseMapping.mapping.keys
+    /** A collection of declared license strings found in open source packages. */
+    private val declaredLicenses = SpdxDeclaredLicenseMapper.MAPPING.keys +
+        SpdxSimpleLicenseMapper.AMBIGUOUS_SIMPLE_MAPPING.keys +
+        SpdxSimpleLicenseMapper.SIMPLE_MAPPING.keys +
+        SpdxSimpleLicenseMapper.DEPRECATED_MAPPING.keys
 
     init {
         "Declared licenses can be processed" {
             declaredLicenses.forAll { declaredLicense ->
-                val processedLicense = DeclaredLicenseProcessor.process(declaredLicense)
-
-                // Include the declared license in the comparison to see where a failure comes from.
-                "$processedLicense from $declaredLicense" shouldNotBe "null from $declaredLicense"
-                processedLicense!!.validate(SpdxExpression.Strictness.ALLOW_CURRENT)
+                withClue(declaredLicense) {
+                    DeclaredLicenseProcessor.process(declaredLicense).shouldNotBeNull {
+                        validate(SpdxExpression.Strictness.ALLOW_CURRENT)
+                    }
+                }
             }
         }
 
@@ -95,11 +94,11 @@ class DeclaredLicenseProcessorTest : StringSpec() {
         }
 
         "Stripping URL surroundings should not make any mapping redundant" {
-            SpdxDeclaredLicenseMapping.mapping.forAll { (license, expression) ->
+            SpdxDeclaredLicenseMapper.MAPPING.forAll { (license, expression) ->
                 val strippedLicense = DeclaredLicenseProcessor.stripUrlSurroundings(license)
 
                 withClue("Stripping '$license' to '$strippedLicense' makes the mapping to '$expression' redundant") {
-                    SpdxSimpleLicenseMapping.map(strippedLicense) should beNull()
+                    SpdxSimpleLicenseMapper.getInstance().map(strippedLicense) should beNull()
                 }
             }
         }
@@ -124,25 +123,25 @@ class DeclaredLicenseProcessorTest : StringSpec() {
             processedLicenses.unmapped should beEmpty()
         }
 
-        "The declared license mapping is applied" {
+        "The custom license mapping is applied" {
             val declaredLicenses = setOf("Apache-2.0", "https://domain/path/license.html")
-            val declaredLicenseMapping = mapOf("https://domain/path/license.html" to "MIT".toSpdx())
+            val customLicenseMapping = mapOf("https://domain/path/license.html" to "MIT".toSpdx())
 
-            val processedLicenses = DeclaredLicenseProcessor.process(declaredLicenses, declaredLicenseMapping)
+            val processedLicenses = DeclaredLicenseProcessor.process(declaredLicenses, customLicenseMapping)
 
             processedLicenses.spdxExpression shouldBe "Apache-2.0 AND MIT".toSpdx()
-            processedLicenses.mapped shouldContainExactly mapOf("https://domain/path/license.html" to "MIT".toSpdx())
+            processedLicenses.mapped should containExactlyEntries("https://domain/path/license.html" to "MIT".toSpdx())
             processedLicenses.unmapped should beEmpty()
         }
 
-        "The declared license mapping discards licenses which are mapped to 'NONE' when applied " {
+        "The custom license mapping discards licenses which are mapped to 'NONE' when applied " {
             val declaredLicenses = setOf("Copyright (c) the authors.", "Apache-2.0", "MIT")
-            val declaredLicenseMapping = mapOf("Copyright (c) the authors." to SpdxConstants.NONE.toSpdx())
+            val customLicenseMapping = mapOf("Copyright (c) the authors." to SpdxConstants.NONE.toSpdx())
 
-            val processedLicenses = DeclaredLicenseProcessor.process(declaredLicenses, declaredLicenseMapping)
+            val processedLicenses = DeclaredLicenseProcessor.process(declaredLicenses, customLicenseMapping)
 
             processedLicenses.spdxExpression shouldBe "Apache-2.0 AND MIT".toSpdx()
-            processedLicenses.mapped shouldContainExactly mapOf(
+            processedLicenses.mapped should containExactlyEntries(
                 "Copyright (c) the authors." to SpdxConstants.NONE.toSpdx()
             )
             processedLicenses.unmapped should beEmpty()

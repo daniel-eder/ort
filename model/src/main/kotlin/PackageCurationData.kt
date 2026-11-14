@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,14 +19,17 @@
 
 package org.ossreviewtoolkit.model
 
-import com.fasterxml.jackson.annotation.JsonAlias
 import com.fasterxml.jackson.annotation.JsonInclude
+import com.fasterxml.jackson.annotation.JsonPropertyOrder
 
-import java.util.SortedSet
+import java.time.Instant
 
 import org.ossreviewtoolkit.utils.common.zip
 import org.ossreviewtoolkit.utils.ort.DeclaredLicenseProcessor
-import org.ossreviewtoolkit.utils.spdx.SpdxExpression
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxCompoundExpression
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxExpression
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxExpression.Strictness.ALLOW_LICENSEREF_EXCEPTIONS
+import org.ossreviewtoolkit.utils.spdxexpression.toExpression
 
 /**
  * This class contains curation data for a package. It is used to amend the automatically detected metadata for a
@@ -41,20 +44,14 @@ data class PackageCurationData(
      */
     val comment: String? = null,
 
-    /**
-     * An additional identifier in [package URL syntax](https://github.com/package-url/purl-spec).
-     */
+    /** An additional identifier in [package URL syntax](https://github.com/package-url/purl-spec). */
     val purl: String? = null,
 
-    /**
-     * An additional identifier in [CPE syntax](https://cpe.mitre.org/specification/).
-     */
+    /** An additional identifier in [CPE syntax](https://cpe.mitre.org/specification/). */
     val cpe: String? = null,
 
-    /**
-     * The set of authors of the package.
-     */
-    val authors: SortedSet<String>? = null,
+    /** The set of authors of the package. */
+    val authors: Set<String>? = null,
 
     /**
      * The concluded license as an [SpdxExpression]. It can be used to override the [declared][Package.declaredLicenses]
@@ -62,40 +59,28 @@ data class PackageCurationData(
      */
     val concludedLicense: SpdxExpression? = null,
 
-    /**
-     * The description of the package, as provided by the package manager.
-     */
+    /** The description of the package, as provided by the package manager. */
     val description: String? = null,
 
-    /**
-     * The homepage of the package.
-     */
+    /** The homepage of the package. */
     val homepageUrl: String? = null,
 
-    /**
-     * The remote artifact where the binary package can be downloaded.
-     */
+    /** The remote artifact where the binary package can be downloaded. */
     val binaryArtifact: RemoteArtifact? = null,
 
-    /**
-     * The remote artifact where the source package can be downloaded.
-     */
+    /** The remote artifact where the source package can be downloaded. */
     val sourceArtifact: RemoteArtifact? = null,
 
-    /**
-     * VCS-related information.
-     */
+    /** The timestamp when the package was published, usually to a package registry like Maven Central. */
+    val publishedAt: Instant? = null,
+
+    /** VCS-related information. */
     val vcs: VcsInfoCurationData? = null,
 
-    /**
-     * Whether the package is metadata only.
-     */
-    @JsonAlias("is_meta_data_only")
+    /** Whether the package is metadata only. */
     val isMetadataOnly: Boolean? = null,
 
-    /**
-     * Whether the package is modified compared to the original source
-     */
+    /** Whether the package is modified compared to the original source */
     val isModified: Boolean? = null,
 
     /**
@@ -103,62 +88,86 @@ data class PackageCurationData(
      * applied by [DeclaredLicenseProcessor.process].
      */
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
-    val declaredLicenseMapping: Map<String, SpdxExpression> = emptyMap()
-) {
+    val declaredLicenseMapping: Map<String, SpdxExpression> = emptyMap(),
+
     /**
-     * Apply this [PackageCuration] to [targetPackage] by overriding all values of [targetPackage] with non-null values
-     * of this [PackageCurationData], and return the resulting [CuratedPackage].
+     * The considered source code origins in order of priority. If not null, this must not be empty and not contain any
+     * duplicates.
      */
-    fun apply(targetPackage: CuratedPackage): CuratedPackage {
-        val original = targetPackage.metadata
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    val sourceCodeOrigins: List<SourceCodeOrigin>? = null,
+
+    /**
+     * User defined labels associated with this package. The labels are not interpreted by the core of ORT itself, but
+     * can be used in parts of ORT such as plugins, in evaluator rules, or in reporter templates.
+     */
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    @JsonPropertyOrder(alphabetic = true)
+    val labels: Map<String, String> = emptyMap()
+) {
+    init {
+        declaredLicenseMapping.forEach { (key, value) ->
+            require(value.isValid(ALLOW_LICENSEREF_EXCEPTIONS)) {
+                "The declared license '$key' is configured to map to '$value' which is not a valid SPDX expression."
+            }
+        }
+    }
+
+    /**
+     * Apply this [PackageCurationData] to [basePackage] by overriding all values of [basePackage] with non-null values
+     * and return the resulting [CuratedPackage].
+     */
+    fun apply(basePackage: CuratedPackage): CuratedPackage {
+        val base = basePackage.metadata
 
         val vcsProcessed = vcs?.let {
             // Curation data for VCS information is handled specially, so we can curate only individual properties.
             VcsInfo(
-                type = it.type ?: original.vcsProcessed.type,
-                url = it.url ?: original.vcsProcessed.url,
-                revision = it.revision ?: original.vcsProcessed.revision,
-                path = it.path ?: original.vcsProcessed.path
+                type = it.type ?: base.vcsProcessed.type,
+                url = it.url ?: base.vcsProcessed.url,
+                revision = it.revision ?: base.vcsProcessed.revision,
+                path = it.path ?: base.vcsProcessed.path
             ).normalize()
-        } ?: original.vcsProcessed
+        } ?: base.vcsProcessed
 
-        val declaredLicenseMapping = targetPackage.getDeclaredLicenseMapping() + declaredLicenseMapping
-        val declaredLicensesProcessed = DeclaredLicenseProcessor.process(
-            original.declaredLicenses,
-            declaredLicenseMapping
-        )
+        val declaredLicenseMapping = basePackage.getDeclaredLicenseMapping() + declaredLicenseMapping
 
-        val pkg = Package(
-            id = original.id,
-            purl = purl ?: original.purl,
-            cpe = cpe ?: original.cpe,
-            authors = authors ?: original.authors,
-            declaredLicenses = original.declaredLicenses,
-            declaredLicensesProcessed = declaredLicensesProcessed,
-            concludedLicense = concludedLicense ?: original.concludedLicense,
-            description = description ?: original.description,
-            homepageUrl = homepageUrl ?: original.homepageUrl,
-            binaryArtifact = binaryArtifact ?: original.binaryArtifact,
-            sourceArtifact = sourceArtifact ?: original.sourceArtifact,
-            vcs = original.vcs,
-            vcsProcessed = vcsProcessed,
-            isMetadataOnly = isMetadataOnly ?: original.isMetadataOnly,
-            isModified = isModified ?: original.isModified
-        )
+        // Preserve an existing top-level operator from the base SPDX expression.
+        val declaredLicensesProcessed = when (val expression = base.declaredLicensesProcessed.spdxExpression) {
+            is SpdxCompoundExpression -> DeclaredLicenseProcessor.process(
+                base.declaredLicenses,
+                declaredLicenseMapping,
+                expression.operator
+            )
 
-        val declaredLicenseMappingDiff = buildMap {
-            val previous = targetPackage.getDeclaredLicenseMapping().toList()
-            val current = declaredLicenseMapping.toList()
-
-            putAll(previous - current)
+            else -> DeclaredLicenseProcessor.process(
+                base.declaredLicenses,
+                declaredLicenseMapping
+            )
         }
 
-        val curations = targetPackage.curations + PackageCurationResult(
-            base = original.diff(pkg).copy(declaredLicenseMapping = declaredLicenseMappingDiff),
-            curation = this
+        val pkg = Package(
+            id = base.id,
+            purl = purl ?: base.purl,
+            cpe = cpe ?: base.cpe,
+            authors = authors ?: base.authors,
+            declaredLicenses = base.declaredLicenses,
+            declaredLicensesProcessed = declaredLicensesProcessed,
+            concludedLicense = concludedLicense ?: base.concludedLicense,
+            description = description ?: base.description,
+            homepageUrl = homepageUrl ?: base.homepageUrl,
+            binaryArtifact = binaryArtifact ?: base.binaryArtifact,
+            sourceArtifact = sourceArtifact ?: base.sourceArtifact,
+            publishedAt = publishedAt ?: base.publishedAt,
+            vcs = base.vcs,
+            vcsProcessed = vcsProcessed,
+            isMetadataOnly = isMetadataOnly ?: base.isMetadataOnly,
+            isModified = isModified ?: base.isModified,
+            sourceCodeOrigins = sourceCodeOrigins ?: base.sourceCodeOrigins,
+            labels = base.labels + labels
         )
 
-        return CuratedPackage(pkg, curations)
+        return CuratedPackage(pkg, basePackage.curations + this)
     }
 
     /**
@@ -171,17 +180,25 @@ data class PackageCurationData(
             comment = setOfNotNull(comment, other.comment).joinToString("\n").takeIf { it.isNotEmpty() },
             purl = purl ?: other.purl,
             cpe = cpe ?: other.cpe,
-            authors = (authors.orEmpty() + other.authors.orEmpty()).toSortedSet(),
-            concludedLicense = setOfNotNull(concludedLicense, other.concludedLicense).reduce(SpdxExpression::and),
+            authors = authors.orEmpty() + other.authors.orEmpty(),
+            concludedLicense = setOfNotNull(concludedLicense, other.concludedLicense).toExpression(),
             description = description ?: other.description,
             homepageUrl = homepageUrl ?: other.homepageUrl,
             binaryArtifact = binaryArtifact ?: other.binaryArtifact,
             sourceArtifact = sourceArtifact ?: other.sourceArtifact,
+            publishedAt = publishedAt ?: other.publishedAt,
             vcs = vcs?.merge(other.vcs ?: vcs) ?: other.vcs,
             isMetadataOnly = isMetadataOnly ?: other.isMetadataOnly,
             isModified = isModified ?: other.isModified,
-            declaredLicenseMapping = declaredLicenseMapping.zip(other.declaredLicenseMapping) { value, otherValue ->
-                (value ?: otherValue)!!
-            }
+            declaredLicenseMapping = declaredLicenseMapping.zip(other.declaredLicenseMapping) { value, _ ->
+                value
+            },
+            sourceCodeOrigins = sourceCodeOrigins ?: other.sourceCodeOrigins,
+            labels = labels + other.labels
         )
 }
+
+private fun CuratedPackage.getDeclaredLicenseMapping(): Map<String, SpdxExpression> =
+    buildMap {
+        curations.forEach { putAll(it.declaredLicenseMapping) }
+    }

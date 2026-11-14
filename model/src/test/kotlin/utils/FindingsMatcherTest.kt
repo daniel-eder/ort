@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@
 
 package org.ossreviewtoolkit.model.utils
 
+import io.kotest.assertions.assertSoftly
 import io.kotest.core.spec.IsolationMode
 import io.kotest.core.spec.style.WordSpec
 import io.kotest.matchers.collections.beEmpty
@@ -27,6 +28,7 @@ import io.kotest.matchers.collections.containExactlyInAnyOrder
 import io.kotest.matchers.maps.beEmpty as beEmptyMap
 import io.kotest.matchers.maps.haveSize
 import io.kotest.matchers.should
+import io.kotest.matchers.shouldBe
 
 import kotlin.random.Random
 
@@ -35,7 +37,7 @@ import org.ossreviewtoolkit.model.LicenseFinding
 import org.ossreviewtoolkit.model.TextLocation
 import org.ossreviewtoolkit.model.utils.FindingsMatcher.Companion.DEFAULT_EXPAND_TOLERANCE_LINES
 import org.ossreviewtoolkit.model.utils.FindingsMatcher.Companion.DEFAULT_TOLERANCE_LINES
-import org.ossreviewtoolkit.utils.spdx.toSpdx
+import org.ossreviewtoolkit.utils.spdxexpression.toSpdx
 
 private fun FindingsMatcherResult.getFindings(license: String): Pair<Set<LicenseFinding>, Set<CopyrightFinding>> =
     matchedFindings.filter { it.key.license == license.toSpdx() }.let {
@@ -49,7 +51,8 @@ class FindingsMatcherTest : WordSpec() {
     private val licenseFindings = mutableSetOf<LicenseFinding>()
     private val copyrightFindings = mutableSetOf<CopyrightFinding>()
 
-    override fun isolationMode() = IsolationMode.InstancePerLeaf
+    // Use InstancePerRoot to work around https://github.com/kotest/kotest/issues/5021.
+    override fun isolationMode() = IsolationMode.InstancePerRoot
 
     private fun setupLicenseFinding(license: String, path: String, line: Int = 1) {
         licenseFindings += LicenseFinding(
@@ -82,8 +85,8 @@ class FindingsMatcherTest : WordSpec() {
                 val result = matcher.match(licenseFindings, copyrightFindings)
                 val (licenseFindings, copyrightFindings) = result.getFindings("some-id")
 
-                licenseFindings.map { it.location.path } should containExactlyInAnyOrder("LICENSE")
-                copyrightFindings.map { it.statement } should containExactlyInAnyOrder("some stmt")
+                licenseFindings.map { it.location.path } should containExactly("LICENSE")
+                copyrightFindings.map { it.statement } should containExactly("some stmt")
             }
         }
 
@@ -268,11 +271,11 @@ class FindingsMatcherTest : WordSpec() {
                 associateLicensesWithExceptions(
                     listOf(
                         LicenseFinding("LicenseRef-scancode-unknown", TextLocation("file", 1)),
-                        LicenseFinding("LLVM-exception", TextLocation("file", 5))
+                        LicenseFinding("389-exception", TextLocation("file", 5))
                     )
                 ) should containExactlyInAnyOrder(
                     LicenseFinding("LicenseRef-scancode-unknown", TextLocation("file", 1)),
-                    LicenseFinding("NOASSERTION WITH LLVM-exception", TextLocation("file", 5))
+                    LicenseFinding("NOASSERTION WITH 389-exception", TextLocation("file", 5))
                 )
             }
 
@@ -280,12 +283,46 @@ class FindingsMatcherTest : WordSpec() {
                 associateLicensesWithExceptions(
                     listOf(
                         LicenseFinding("Apache-2.0", TextLocation("fileA", 1)),
-                        LicenseFinding("LLVM-exception", TextLocation("fileB", 5))
+                        LicenseFinding("389-exception", TextLocation("fileB", 5))
                     )
                 ) should containExactlyInAnyOrder(
                     LicenseFinding("Apache-2.0", TextLocation("fileA", 1)),
-                    LicenseFinding("NOASSERTION WITH LLVM-exception", TextLocation("fileB", 5))
+                    LicenseFinding("NOASSERTION WITH 389-exception", TextLocation("fileB", 5))
                 )
+            }
+
+            "associate licenses and exceptions from the same expression" {
+                assertSoftly {
+                    associateLicensesWithExceptions(
+                        "MIT OR (GPL-2.0-only AND CC-BY-3.0 AND GCC-exception-2.0)".toSpdx()
+                    ) shouldBe "MIT OR (GPL-2.0-only WITH GCC-exception-2.0 AND CC-BY-3.0)".toSpdx()
+
+                    associateLicensesWithExceptions(
+                        "MIT OR (0BSD AND CC-BY-3.0 AND GCC-exception-2.0)".toSpdx()
+                    ) shouldBe "MIT OR (0BSD AND CC-BY-3.0 AND NOASSERTION WITH GCC-exception-2.0)".toSpdx()
+
+                    associateLicensesWithExceptions(
+                        @Suppress("MaxLineLength")
+                        "(BSD-3-Clause AND GPL-2.0-only WITH GCC-exception-2.0) AND (GPL-2.0-only AND GCC-exception-2.0)".toSpdx()
+                    ) shouldBe "BSD-3-Clause AND GPL-2.0-only WITH GCC-exception-2.0".toSpdx()
+
+                    associateLicensesWithExceptions(
+                        "GPL-2.0-only AND GPL-3.0-only AND Bootloader-exception AND Classpath-exception-2.0".toSpdx()
+                    ) shouldBe (
+                        "GPL-2.0-only WITH Bootloader-exception AND " +
+                            "GPL-3.0-only WITH Bootloader-exception AND " +
+                            "GPL-2.0-only WITH Classpath-exception-2.0 AND " +
+                            "GPL-3.0-only WITH Classpath-exception-2.0"
+                        ).toSpdx()
+
+                    associateLicensesWithExceptions(
+                        @Suppress("MaxLineLength")
+                        "(CDDL-1.1 OR GPL-2.0-only WITH Classpath-exception-2.0) AND GPL-2.0-only AND Classpath-exception-2.0".toSpdx()
+                    ) shouldBe (
+                        "(CDDL-1.1 OR GPL-2.0-only WITH Classpath-exception-2.0) AND " +
+                            "GPL-2.0-only WITH Classpath-exception-2.0"
+                        ).toSpdx()
+                }
             }
         }
     }

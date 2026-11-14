@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,156 +17,54 @@
  * License-Filename: LICENSE
  */
 
-import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
-
-import java.nio.charset.Charset
+val cliAnalyzerOnly = project.findProperty("cliAnalyzerOnly")?.toString().toBoolean()
 
 plugins {
-    // Apply core plugins.
-    application
-
-    // Apply third-party plugins.
-    alias(libs.plugins.graal)
-    alias(libs.plugins.shadow)
+    // Apply precompiled plugins.
+    id("ort-application-conventions")
 }
+
+// See https://docs.gradle.org/current/userguide/declaring_configurations.html#sec:configuration-flags-roles.
+configurations.dependencyScope("pluginClasspath")
+configurations["runtimeOnly"].extendsFrom(configurations["pluginClasspath"])
 
 application {
     applicationName = "ort"
-    mainClass.set("org.ossreviewtoolkit.cli.OrtMainKt")
-}
-
-graal {
-    graalVersion(libs.versions.graal.get())
-    javaVersion("17")
-
-    // Build a standalone native executable or report a failure.
-    option("--no-fallback")
-
-    // Work-around for:
-    // "WARNING: Unknown module: org.graalvm.nativeimage.llvm specified to --add-exports"
-    option("-J--add-modules")
-    option("-JALL-SYSTEM")
-
-    // Work-around for:
-    // "Error: Classes that should be initialized at run time got initialized during image building"
-    option("--initialize-at-build-time=org.jruby.util.RubyFileTypeDetector")
-
-    // Work-around for:
-    // "Unsupported method java.lang.invoke.MethodHandleNatives.setCallSiteTargetNormal() is reachable"
-    option("--report-unsupported-elements-at-runtime")
-
-    // Work-around for:
-    // "Error: Non-reducible loop requires too much duplication"
-    option("-H:MaxDuplicationFactor=3.0")
-
-    mainClass("org.ossreviewtoolkit.cli.OrtMainKt")
-    outputName("ort")
-}
-
-tasks.withType<ShadowJar>().configureEach {
-    isZip64 = true
-}
-
-tasks.named<CreateStartScripts>("startScripts").configure {
-    doLast {
-        // Work around the command line length limit on Windows when passing the classpath to Java, see
-        // https://github.com/gradle/gradle/issues/1989#issuecomment-395001392.
-        val windowsScriptText = windowsScript.readText(Charset.defaultCharset())
-        windowsScript.writeText(
-            windowsScriptText.replace(
-                Regex("set CLASSPATH=%APP_HOME%\\\\lib\\\\.*"),
-                "set CLASSPATH=%APP_HOME%\\\\lib\\\\*;%APP_HOME%\\\\plugin\\\\*"
-            )
-        )
-
-        val unixScriptText = unixScript.readText(Charset.defaultCharset())
-        unixScript.writeText(
-            unixScriptText.replace(
-                Regex("CLASSPATH=\\\$APP_HOME/lib/.*"),
-                "CLASSPATH=\\\$APP_HOME/lib/*:\\\$APP_HOME/plugin/*"
-            )
-        )
-    }
-}
-
-repositories {
-    // Need to repeat several custom repository definitions of other submodules here, see
-    // https://github.com/gradle/gradle/issues/4106.
-    exclusiveContent {
-        forRepository {
-            maven("https://repo.gradle.org/gradle/libs-releases/")
-        }
-
-        filter {
-            includeGroup("org.gradle")
-        }
-    }
-
-    exclusiveContent {
-        forRepository {
-            maven("https://repo.eclipse.org/content/repositories/sw360-releases/")
-        }
-
-        filter {
-            includeGroup("org.eclipse.sw360")
-        }
-    }
-
-    exclusiveContent {
-        forRepository {
-            maven("https://jitpack.io/")
-        }
-
-        filter {
-            includeGroup("com.github.ralfstuckert.pdfbox-layout")
-            includeGroup("com.github.everit-org.json-schema")
-        }
-    }
-    exclusiveContent {
-        forRepository {
-            maven("https://packages.atlassian.com/maven-external")
-        }
-
-        filter {
-            includeGroupByRegex("com\\.atlassian\\..*")
-            includeVersionByRegex("log4j", "log4j", ".*-atlassian-.*")
-        }
-    }
+    mainClass = "org.ossreviewtoolkit.cli.OrtMainKt"
 }
 
 dependencies {
-    implementation(project(":advisor"))
-    implementation(project(":analyzer"))
-    implementation(project(":downloader"))
-    implementation(project(":evaluator"))
-    implementation(project(":model"))
-    implementation(project(":notifier"))
-    implementation(project(":reporter"))
-    implementation(project(":scanner"))
-    implementation(project(":utils:ort-utils"))
-    implementation(project(":utils:spdx-utils"))
+    if (cliAnalyzerOnly) {
+        "pluginClasspath"(projects.plugins.commands.analyzerCommand)
+        "pluginClasspath"(platform(projects.plugins.packageCurationProviders))
+        "pluginClasspath"(platform(projects.plugins.packageManagers))
+    } else {
+        "pluginClasspath"(platform(projects.plugins.advisors))
+        "pluginClasspath"(platform(projects.plugins.commands))
+        "pluginClasspath"(platform(projects.plugins.licenseFactProviders))
+        "pluginClasspath"(platform(projects.plugins.packageConfigurationProviders))
+        "pluginClasspath"(platform(projects.plugins.packageCurationProviders))
+        "pluginClasspath"(platform(projects.plugins.packageManagers))
+        "pluginClasspath"(platform(projects.plugins.reporters))
+        "pluginClasspath"(platform(projects.plugins.scanners))
+        "pluginClasspath"(platform(projects.plugins.versionControlSystems))
+    }
 
-    implementation("org.jetbrains.kotlin:kotlin-reflect")
-    implementation(libs.bundles.exposed)
+    implementation(projects.model)
+    implementation(projects.plugins.commands.commandApi)
+    implementation(projects.utils.commonUtils)
+    implementation(projects.utils.ortUtils)
     implementation(libs.clikt)
-    implementation(libs.hikari)
-    implementation(libs.jacksonModuleKotlin)
-    implementation(libs.kotlinxCoroutines)
-    implementation(libs.kotlinxSerialization)
-    implementation(libs.log4jApiToSlf4j)
-    implementation(libs.logbackClassic)
-    implementation(libs.postgres)
-    implementation(libs.reflections)
-    implementation(libs.sw360Client)
+    implementation(libs.mordant)
+    implementation(libs.slf4j)
 
-    testImplementation(project(":utils:test-utils"))
-
-    testImplementation(libs.greenmail)
-    testImplementation(libs.kotestAssertionsCore)
-    testImplementation(libs.kotestRunnerJunit5)
-
-    funTestImplementation(sourceSets["main"].output)
-    funTestImplementation(sourceSets["test"].output)
+    funTestImplementation(testFixtures(projects.analyzer))
+    funTestImplementation(projects.downloader)
+    funTestImplementation(projects.evaluator)
+    funTestImplementation(projects.notifier)
+    funTestImplementation(projects.plugins.packageManagers.gradleInspector)
+    funTestImplementation(projects.plugins.versionControlSystems.gitVersionControlSystem)
+    funTestImplementation(projects.reporter)
+    funTestImplementation(projects.utils.testUtils)
+    funTestImplementation(libs.greenmail)
 }
-
-configurations["funTestImplementation"].extendsFrom(configurations["testImplementation"])

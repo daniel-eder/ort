@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,31 +17,26 @@
  * License-Filename: LICENSE
  */
 
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
-
-@Suppress("DSL_SCOPE_VIOLATION") // See https://youtrack.jetbrains.com/issue/KTIJ-19369.
 plugins {
-    // Apply core plugins.
-    `java-library`
+    // Apply precompiled plugins.
+    id("ort-library-conventions")
 
     // Apply third-party plugins.
     alias(libs.plugins.kotlinSerialization)
 }
 
 dependencies {
+    api(libs.kotlinx.serialization.core)
+    api(libs.kotlinx.serialization.json)
+    api(libs.okhttp)
     api(libs.retrofit)
 
-    implementation(libs.kotlinxSerialization)
-    implementation(libs.retrofitConverterKotlinxSerialization)
-    implementation(libs.retrofitConverterScalars)
+    implementation(projects.utils.commonUtils)
+    implementation(libs.kotlinx.coroutines)
+    implementation(libs.ks3.jdk)
+    implementation(libs.ks3.standard)
+    implementation(libs.retrofit.converter.kotlinxSerialization)
+    implementation(libs.retrofit.converter.scalars)
 }
 
-tasks.withType<KotlinCompile>().configureEach {
-    val customCompilerArgs = listOf(
-        "-opt-in=kotlinx.serialization.ExperimentalSerializationApi"
-    )
-
-    kotlinOptions {
-        freeCompilerArgs = freeCompilerArgs + customCompilerArgs
-    }
-}
+description = "A client to communicate with the API of the ClearlyDefined service."

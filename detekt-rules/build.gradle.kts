@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2020 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,22 +19,40 @@
 
 import org.gradle.internal.logging.text.StyledTextOutput
 import org.gradle.internal.logging.text.StyledTextOutputFactory
-import org.gradle.kotlin.dsl.support.serviceOf
+
+import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
 plugins {
-    // Apply core plugins.
-    `java-library`
+    // Apply precompiled plugins.
+    id("ort-library-conventions")
 }
 
 dependencies {
-    compileOnly(libs.detektApi)
+    compileOnly(libs.detekt.api)
+    compileOnly(libs.detekt.psiUtils)
+
+    testImplementation(projects.utils.commonUtils)
+    testImplementation(libs.detekt.api)
+    testImplementation(libs.detekt.test)
+    testImplementation(libs.detekt.testUtils)
+
+    testRuntimeOnly(libs.detekt.psiUtils)
 }
 
-tasks.named<Jar>("jar").configure {
+// A provider to get a StyledTextOutputFactory via dependency injection.
+interface StyledTextOutputProvider {
+    @get:Inject
+    val out: StyledTextOutputFactory
+}
+
+tasks.named<KotlinCompile>("compileKotlin") {
+    // Resolve objects at configuration time to be compatible with the configuration cache.
+    val objects = objects
+
     doLast {
-        val out = serviceOf<StyledTextOutputFactory>().create("detekt-rules")
+        val out = objects.newInstance<StyledTextOutputProvider>().out.create("detekt-rules")
         val message = "The detekt-rules have changed. You need to stop the Gradle daemon to allow the detekt plugin " +
-                "to reload for the rule changes to take effect."
+            "to reload for the rule changes to take effect."
         out.withStyle(StyledTextOutput.Style.Info).println(message)
     }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2020 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@
 package org.ossreviewtoolkit.clients.fossid.model.identification.identifiedFiles
 
 import org.ossreviewtoolkit.clients.fossid.model.identification.common.LicenseMatchType
+import org.ossreviewtoolkit.clients.fossid.model.result.LicenseCategory
 
 data class License(
     val fileLicenseMatchType: LicenseMatchType,
@@ -30,6 +31,8 @@ data class License(
     val isFoss: Int?,
     val isOsiApproved: Int?,
     val isSpdxStandard: Int?,
+    val category: LicenseCategory? = null,
 
-    val name: String?
+    val name: String?,
+    val text: String? = null
 )

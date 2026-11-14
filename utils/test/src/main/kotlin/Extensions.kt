@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,70 +19,39 @@
 
 package org.ossreviewtoolkit.utils.test
 
+import com.fasterxml.jackson.module.kotlin.readValue
+
 import io.kotest.core.TestConfiguration
-import io.kotest.matchers.nulls.shouldNotBeNull
+import io.kotest.engine.spec.tempfile
 
 import java.io.File
-import java.net.InetSocketAddress
-import java.net.Proxy
 
-import org.ossreviewtoolkit.model.config.LicenseFilenamePatterns
-import org.ossreviewtoolkit.model.utils.FileArchiver
-import org.ossreviewtoolkit.utils.common.safeDeleteRecursively
-import org.ossreviewtoolkit.utils.ort.createOrtTempDir
-import org.ossreviewtoolkit.utils.ort.createOrtTempFile
-import org.ossreviewtoolkit.utils.ort.storage.LocalFileStorage
+import org.ossreviewtoolkit.model.FileFormat
+import org.ossreviewtoolkit.model.OrtResult
 
-fun Proxy.toGenericString() =
-    (address() as? InetSocketAddress)?.let { address -> "${type()} @ ${address.hostString}:${address.port}" }
+fun TestConfiguration.extractResource(name: String) =
+    tempfile(name.substringAfterLast('/'), name.substringAfterLast('.', "")).apply { writeText(readResource(name)) }
 
-infix fun <T : Any> T?.shouldNotBeNull(block: T.() -> Unit) {
-    this.shouldNotBeNull()
-    block()
-}
+fun TestConfiguration.getResource(name: String) = checkNotNull(javaClass.getResource(name))
 
-fun FileArchiver.Companion.createDefault(): FileArchiver =
-    FileArchiver(
-        patterns = LicenseFilenamePatterns.DEFAULT.allLicenseFilenames.map { "**/$it" },
-        storage = LocalFileStorage(DEFAULT_ARCHIVE_DIR)
-    )
+fun TestConfiguration.readResource(name: String) = getResource(name).readText()
 
-fun TestConfiguration.createSpecTempDir(vararg infixes: String): File {
-    val dir = createOrtTempDir(*infixes)
+fun TestConfiguration.readOrtResult(name: String) =
+    FileFormat.forExtension(name.substringAfterLast('.')).mapper
+        .readValue<OrtResult>(patchExpectedResult(readResource(name)))
 
-    afterSpec {
-        dir.safeDeleteRecursively(force = true)
-    }
+inline fun <reified T : Any> TestConfiguration.readResourceValue(name: String): T =
+    FileFormat.forExtension(name.substringAfterLast('.')).mapper.readValue<T>(getResource(name))
 
-    return dir
-}
-
-fun TestConfiguration.createSpecTempFile(prefix: String? = null, suffix: String? = null): File {
-    val file = createOrtTempFile(prefix, suffix)
-
-    afterSpec {
-        file.delete()
-    }
-
-    return file
-}
-
-fun TestConfiguration.createTestTempDir(vararg infixes: String): File {
-    val dir = createOrtTempDir(*infixes)
-
-    afterTest {
-        dir.safeDeleteRecursively(force = true)
-    }
-
-    return dir
-}
-
-fun TestConfiguration.createTestTempFile(prefix: String? = null, suffix: String? = null): File {
-    val file = createOrtTempFile(prefix, suffix)
-
-    afterTest {
-        file.delete()
-    }
-
-    return file
+/**
+ * Return the corresponding [File] location in the source tree. The function is for development only, and can help
+ * to update expected result files. This function can be used to update expected results by inserting on lines into
+ * the test code, for example: `getResourceAsFileInSourceTree("/expected-output.yml").writeText(result)`.
+ */
+@Suppress("unused") // This is intended to be used for development.
+fun TestConfiguration.getResourceAsFileInSourceTree(name: String): File? {
+    val path = getResource(name).takeIf { it.protocol == "file" }?.path ?: return null
+    // Convert subpaths like e.g. "/build/resources/funTest/" to "/src/funTest/resources/".
+    val newPath = path.replace(Regex("/build/resources/(\\w+)/"), "/src/$1/resources/")
+    return File(newPath).takeIf { newPath != path }
 }

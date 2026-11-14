@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2022 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,8 @@
  * License-Filename: LICENSE
  */
 
+package org.ossreviewtoolkit.clients.fossid
+
 import com.github.tomakehurst.wiremock.WireMockServer
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration
 
@@ -30,8 +32,6 @@ import java.io.File
 
 import kotlin.io.path.createTempDirectory
 
-import org.ossreviewtoolkit.clients.fossid.FossIdRestService
-import org.ossreviewtoolkit.clients.fossid.generateReport
 import org.ossreviewtoolkit.clients.fossid.model.report.ReportType
 import org.ossreviewtoolkit.clients.fossid.model.report.SelectionType
 
@@ -41,14 +41,14 @@ class FossIdReportTest : StringSpec({
     val server = WireMockServer(
         WireMockConfiguration.options()
             .dynamicPort()
-            .usingFilesUnderDirectory("src/test/assets/report")
+            .usingFilesUnderClasspath("report")
     )
     lateinit var service: FossIdRestService
     lateinit var directory: File
 
     beforeSpec {
         server.start()
-        service = FossIdRestService.createService("http://localhost:${server.port()}")
+        service = FossIdRestService.create("http://localhost:${server.port()}")
 
         directory = createTempDirectory("fossid_report").toFile()
     }
@@ -66,10 +66,10 @@ class FossIdReportTest : StringSpec({
         val result = service.generateReport(
             "", "", SCAN_CODE, ReportType.HTML_DYNAMIC, SelectionType.INCLUDE_FOSS, directory
         )
-        result.shouldBeSuccess {
+        result shouldBeSuccess {
             it shouldHaveName "fossid-" +
-                    "semver4j_semver4j__20220119_094101_delta-" +
-                    "cc1267688905d7493df292786a245297c9fd36ee.html"
+                "semver4j_semver4j__20220119_094101_delta-" +
+                "cc1267688905d7493df292786a245297c9fd36ee.html"
             it.useLines { lines ->
                 lines shouldContain "<html>"
             }
@@ -80,7 +80,8 @@ class FossIdReportTest : StringSpec({
         val result = service.generateReport(
             "", "", SCAN_CODE, ReportType.XLSX, SelectionType.INCLUDE_FOSS, directory
         )
-        result.shouldBeSuccess {
+
+        result shouldBeSuccess {
             it shouldHaveName "semver4j_semver4j__20220119_094101_delta-4d39359cd861c314020ead401d95ca20dc179495.xlsx"
         }
     }
@@ -89,7 +90,8 @@ class FossIdReportTest : StringSpec({
         val result = service.generateReport(
             "", "", SCAN_CODE, ReportType.HTML_STATIC, SelectionType.INCLUDE_FOSS, directory
         )
-        result.shouldBeSuccess {
+
+        result shouldBeSuccess {
             it.name shouldEndWith "$SCAN_CODE-report.html"
             it.useLines { lines ->
                 lines shouldContain "<html>"

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,25 +21,19 @@ package org.ossreviewtoolkit.utils.spdx
 
 import io.kotest.core.spec.style.WordSpec
 import io.kotest.core.test.TestCase
-import io.kotest.matchers.nulls.beNull
-import io.kotest.matchers.should
+import io.kotest.engine.spec.tempdir
 import io.kotest.matchers.shouldBe
-import io.kotest.matchers.shouldNot
-import io.kotest.matchers.string.beBlank
-import io.kotest.matchers.string.endWith
-import io.kotest.matchers.string.startWith
 
 import java.io.File
 
+import org.ossreviewtoolkit.model.HashAlgorithm
 import org.ossreviewtoolkit.utils.common.VCS_DIRECTORIES
-import org.ossreviewtoolkit.utils.spdx.SpdxConstants.EMPTY_PACKAGE_VERIFICATION_CODE
-import org.ossreviewtoolkit.utils.test.createTestTempDir
 
 class UtilsTest : WordSpec() {
     private lateinit var tempDir: File
 
     override suspend fun beforeEach(testCase: TestCase) {
-        tempDir = createTestTempDir()
+        tempDir = tempdir()
     }
 
     private fun setupTempFile(filename: String, content: String) =
@@ -48,7 +42,7 @@ class UtilsTest : WordSpec() {
     init {
         "calculatePackageVerificationCode" should {
             "return the SHA1 for an empty string on no input" {
-                calculatePackageVerificationCode(emptySequence<String>()) shouldBe EMPTY_PACKAGE_VERIFICATION_CODE
+                calculatePackageVerificationCode(emptySequence<String>()) shouldBe HashAlgorithm.SHA1.emptyValue
             }
 
             "work for given SHA1s and excludes" {
@@ -87,7 +81,7 @@ class UtilsTest : WordSpec() {
 
                 calculatePackageVerificationCode(sha1sums) shouldBe "1a74d8321c452522ec516a46893e6a42f36b5953"
                 calculatePackageVerificationCode(sha1sums, excludes) shouldBe
-                        "1a74d8321c452522ec516a46893e6a42f36b5953 (excludes: ./package.spdx)"
+                    "1a74d8321c452522ec516a46893e6a42f36b5953 (excludes: ./package.spdx)"
             }
 
             "work for given files and excludes" {
@@ -100,7 +94,7 @@ class UtilsTest : WordSpec() {
 
                 calculatePackageVerificationCode(files) shouldBe "378d5a37b5b10b90535e32a190014d2a8d25354a"
                 calculatePackageVerificationCode(files, excludes) shouldBe
-                        "378d5a37b5b10b90535e32a190014d2a8d25354a (excludes: ./package.spdx)"
+                    "378d5a37b5b10b90535e32a190014d2a8d25354a (excludes: ./package.spdx)"
             }
 
             "work for a given file" {
@@ -118,7 +112,7 @@ class UtilsTest : WordSpec() {
                 setupTempFile("dir/package.spdx", "content")
 
                 calculatePackageVerificationCode(tempDir) shouldBe
-                        "15d3fa138d9302ec9a1584180b5eba0d342b60fa (excludes: ./package.spdx, ./dir/package.spdx)"
+                    "15d3fa138d9302ec9a1584180b5eba0d342b60fa (excludes: ./package.spdx, ./dir/package.spdx)"
             }
 
             "exclude VCS directories" {
@@ -129,72 +123,7 @@ class UtilsTest : WordSpec() {
                 }
 
                 calculatePackageVerificationCode(tempDir) shouldBe
-                        "81e250a78cc6386afc25fa57ad6eaee31394019b"
-            }
-        }
-
-        "getLicenseText" should {
-            "return the full license text for a valid SPDX license id" {
-                val text = getLicenseText("Apache-2.0")?.trim()
-
-                text should startWith("Apache License")
-                text should endWith("limitations under the License.")
-            }
-
-            "return the full license text for a valid SPDX license id with the '+' operator" {
-                val text = getLicenseText("Apache-2.0+")?.trim()
-
-                text should startWith("Apache License")
-                text should endWith("limitations under the License.")
-            }
-
-            "return null for an invalid SPDX license id" {
-                getLicenseText("FooBar-1.0") should beNull()
-            }
-
-            "return the exception text for an SPDX exception id if handling exceptions is enabled" {
-                val text = getLicenseText("Autoconf-exception-3.0", true)?.trim()
-
-                text should startWith("AUTOCONF CONFIGURE SCRIPT EXCEPTION")
-                text should endWith("the copyleft requirements of the license of Autoconf.")
-            }
-
-            "return null for an SPDX exception id if handling exceptions is disabled" {
-                getLicenseText("Autoconf-exception-3.0", false) should beNull()
-            }
-
-            "return a non-blank string for all SPDX ids" {
-                enumValues<SpdxLicense>().forEach {
-                    getLicenseText(it.id) shouldNot beBlank()
-                }
-            }
-
-            "return null for an unknown SPDX LicenseRef" {
-                getLicenseText("LicenseRef-foo-bar") should beNull()
-            }
-
-            "return the full license text for a LicenseRef-ort license" {
-                val text = getLicenseText("LicenseRef-ort-oracle-futc")?.trim()
-
-                text should startWith("Oracle Free Use Terms and Conditions")
-                text should endWith("Last updated: 9 October 2018")
-            }
-        }
-
-        "getLicenseText provided a custom dir" should {
-            "return the custom license text for a license ID not known by ort but in custom dir" {
-                val id = "LicenseRef-ort-abc"
-                val text = "a\nb\nc\n"
-
-                setupTempFile(id, text)
-
-                getLicenseText(id, handleExceptions = true, listOf(tempDir)) shouldBe text
-            }
-
-            "return null if license text is not known by ort and also not in custom dir" {
-                setupTempFile("LicenseRef-ort-abc", "abc")
-
-                getLicenseText("LicenseRef-not-present", handleExceptions = true, listOf(tempDir)) should beNull()
+                    "81e250a78cc6386afc25fa57ad6eaee31394019b"
             }
         }
     }

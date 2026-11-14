@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,20 +26,21 @@ import io.kotest.matchers.collections.containAll
 import io.kotest.matchers.collections.containExactly
 import io.kotest.matchers.collections.containExactlyInAnyOrder
 import io.kotest.matchers.collections.haveSize
-import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
+import io.kotest.matchers.collections.shouldNotContain
 import io.kotest.matchers.maps.containExactly as containExactlyEntries
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.sequences.beEmpty as beEmptySequence
-import io.kotest.matchers.sequences.containExactly as containSequenceExactly
+import io.kotest.matchers.sequences.containAllInAnyOrder
 import io.kotest.matchers.should
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNot
 import io.kotest.matchers.shouldNotBe
 
-import java.io.File
 import java.time.Instant
 
+import org.ossreviewtoolkit.model.DependencyNavigator.Companion.MATCH_SUB_PROJECTS
 import org.ossreviewtoolkit.utils.test.readOrtResult
-import org.ossreviewtoolkit.utils.test.shouldNotBeNull
+import org.ossreviewtoolkit.utils.test.readResourceValue
 
 /**
  * A base class for tests of concrete [DependencyNavigator] implementations.
@@ -72,7 +73,9 @@ abstract class AbstractDependencyNavigatorTest : WordSpec() {
 
         "directDependencies" should {
             "return the direct dependencies of a project" {
-                navigator.directDependencies(testProject, "test").map { it.id } should containSequenceExactly(
+                val scopeDependencies = navigator.directDependencies(testProject, "test").map { it.id }
+
+                scopeDependencies should containAllInAnyOrder(
                     Identifier("Maven:org.scalacheck:scalacheck_2.12:1.13.5"),
                     Identifier("Maven:org.scalatest:scalatest_2.12:3.0.4")
                 )
@@ -83,86 +86,100 @@ abstract class AbstractDependencyNavigatorTest : WordSpec() {
             }
         }
 
-        "scopeDependencies" should {
-            "return a map with scopes and their dependencies for a project" {
-                val scopeDependencies = navigator.scopeDependencies(testProject)
+        "projectDependencies" should {
+            "return all dependencies from all scopes for a project" {
+                val scopeDependencies = navigator.projectDependencies(testProject)
 
-                scopeDependencies.keys should containExactlyInAnyOrder("compile", "test")
-
-                scopeDependencies["compile"] shouldNotBeNull {
-                    this should haveSize(17)
-                    this should containAll(
-                        Identifier("Maven:com.typesafe.akka:akka-actor_2.12:2.5.6"),
-                        Identifier("Maven:org.scala-lang:scala-reflect:2.12.2"),
-                        Identifier("Maven:org.scala-lang:scala-library:2.12.3")
-                    )
-                }
-
-                scopeDependencies["test"] shouldNotBeNull {
-                    this should haveSize(6)
-                    this should containAll(
-                        Identifier("Maven:org.scalacheck:scalacheck_2.12:1.13.5"),
-                        Identifier("Maven:org.scalactic:scalactic_2.12:3.0.4")
-                    )
-                }
+                scopeDependencies should haveSize(23)
+                scopeDependencies should containAll(
+                    Identifier("Maven:com.typesafe.akka:akka-actor_2.12:2.5.6"),
+                    Identifier("Maven:org.scala-lang:scala-reflect:2.12.2"),
+                    Identifier("Maven:org.scala-lang:scala-library:2.12.15"),
+                    Identifier("Maven:org.scalacheck:scalacheck_2.12:1.13.5"),
+                    Identifier("Maven:org.scalactic:scalactic_2.12:3.0.4")
+                )
             }
 
-            "return a map with scopes and their direct dependencies by using maxDepth = 1" {
-                val scopeDependencies = navigator.scopeDependencies(testProject, maxDepth = 1)
+            "return direct dependencies from all scopes by using maxDepth = 1" {
+                val scopeDependencies = navigator.projectDependencies(testProject, maxDepth = 1)
 
-                scopeDependencies["compile"] shouldNotBeNull {
-                    this should haveSize(7)
-                    this shouldNot contain(Identifier("Maven:com.typesafe.akka:akka-actor_2.12:2.5.6"))
-                }
+                scopeDependencies should haveSize(9)
+                scopeDependencies shouldNotContain Identifier("Maven:com.typesafe.akka:akka-actor_2.12:2.5.6")
             }
 
-            "return a map with scopes and their dependencies up to a given maxDepth" {
-                val scopeDependencies = navigator.scopeDependencies(testProject, maxDepth = 2)
+            "return all dependencies from all scopes up to a given maxDepth" {
+                val scopeDependencies = navigator.projectDependencies(testProject, maxDepth = 2)
 
-                scopeDependencies["compile"] shouldNotBeNull {
-                    this should haveSize(14)
-                    this shouldNot contain(
-                        Identifier("Maven:org.scala-lang.modules:scala-java8-compat_2.12:0.8.0")
-                    )
-                }
+                scopeDependencies should haveSize(20)
+                scopeDependencies shouldNotContain
+                    Identifier("Maven:org.scala-lang.modules:scala-java8-compat_2.12:0.8.0")
             }
 
-            "return a map with scopes and their dependencies with filter criteria" {
+            "return dependencies from all scopes that match a filter criteria" {
                 val matchedIds = mutableSetOf<Identifier>()
-                val scopeDependencies = navigator.scopeDependencies(testProject) { node ->
+                val scopeDependencies = navigator.projectDependencies(testProject) { node ->
                     matchedIds += node.id
                     node.id.namespace == "com.typesafe.akka"
                 }
 
-                scopeDependencies["compile"] shouldNotBeNull {
-                    this should containExactlyInAnyOrder(
-                        Identifier("Maven:com.typesafe.akka:akka-actor_2.12:2.5.6"),
-                        Identifier("Maven:com.typesafe.akka:akka-stream_2.12:2.5.6")
-                    )
+                matchedIds should haveSize(23)
+                scopeDependencies should containExactlyInAnyOrder(
+                    Identifier("Maven:com.typesafe.akka:akka-actor_2.12:2.5.6"),
+                    Identifier("Maven:com.typesafe.akka:akka-stream_2.12:2.5.6")
+                )
+            }
+
+            "return the combination of scope dependencies of a project" {
+                val projectDependencies = navigator.projectDependencies(testProject)
+                val expectedDependencies = navigator.scopeDependencies(testProject, "compile") +
+                    navigator.scopeDependencies(testProject, "test")
+
+                projectDependencies should containExactlyInAnyOrder(expectedDependencies)
+            }
+
+            "support filtering the direct dependencies of a project" {
+                val dependencies = navigator.projectDependencies(testProject, maxDepth = 1) {
+                    it.linkage != PackageLinkage.PROJECT_DYNAMIC
                 }
 
-                matchedIds should haveSize(23)
+                dependencies should containExactlyInAnyOrder(
+                    Identifier("Maven:ch.qos.logback:logback-classic:1.2.3"),
+                    Identifier("Maven:com.typesafe:config:1.3.1"),
+                    Identifier("Maven:com.typesafe.akka:akka-stream_2.12:2.5.6"),
+                    Identifier("Maven:com.typesafe.scala-logging:scala-logging_2.12:3.7.2"),
+                    Identifier("Maven:net.logstash.logback:logstash-logback-encoder:4.11"),
+                    Identifier("Maven:org.scala-lang:scala-library:2.12.15"),
+                    Identifier("Maven:org.slf4j:jcl-over-slf4j:1.7.25"),
+                    Identifier("Maven:org.scalacheck:scalacheck_2.12:1.13.5"),
+                    Identifier("Maven:org.scalatest:scalatest_2.12:3.0.4")
+                )
+            }
+
+            "return no dependencies for a maxDepth of 0" {
+                val dependencies = navigator.projectDependencies(testProject, 0)
+
+                dependencies should beEmpty()
             }
         }
 
-        "dependenciesForScope" should {
+        "scopeDependencies" should {
             "return an empty set for an unknown scope" {
-                navigator.dependenciesForScope(testProject, "unknownScope") should beEmpty()
+                navigator.scopeDependencies(testProject, "unknownScope") should beEmpty()
             }
 
             "return the dependencies of a specific scope" {
-                val compileDependencies = navigator.dependenciesForScope(testProject, "compile")
+                val compileDependencies = navigator.scopeDependencies(testProject, "compile")
 
                 compileDependencies should haveSize(17)
                 compileDependencies should containAll(
                     Identifier("Maven:com.typesafe.akka:akka-actor_2.12:2.5.6"),
                     Identifier("Maven:org.scala-lang:scala-reflect:2.12.2"),
-                    Identifier("Maven:org.scala-lang:scala-library:2.12.3")
+                    Identifier("Maven:org.scala-lang:scala-library:2.12.15")
                 )
             }
 
             "return the dependencies of a specific scope up to a given maxDepth" {
-                val compileDependencies = navigator.dependenciesForScope(testProject, "compile", maxDepth = 2)
+                val compileDependencies = navigator.scopeDependencies(testProject, "compile", maxDepth = 2)
 
                 compileDependencies should haveSize(14)
                 compileDependencies shouldNot contain(
@@ -171,11 +188,11 @@ abstract class AbstractDependencyNavigatorTest : WordSpec() {
             }
 
             "return the dependencies of a specific scope with filter criteria" {
-                val akkaDependencies = navigator.dependenciesForScope(testProject, "compile") { node ->
+                val akkaDependencies = navigator.scopeDependencies(testProject, "compile") { node ->
                     "akka" in node.id.namespace
                 }
 
-                akkaDependencies.shouldContainExactlyInAnyOrder(
+                akkaDependencies should containExactlyInAnyOrder(
                     Identifier("Maven:com.typesafe.akka:akka-actor_2.12:2.5.6"),
                     Identifier("Maven:com.typesafe.akka:akka-stream_2.12:2.5.6")
                 )
@@ -228,6 +245,15 @@ abstract class AbstractDependencyNavigatorTest : WordSpec() {
                     Identifier("Maven:com.typesafe.akka:akka-actor_2.12:2.5.6")
                 )
             }
+
+            "find all the sub-projects of a project" {
+                val projectId = Identifier("SBT:com.pbassiner:multi1_2.12:0.1.0-SNAPSHOT")
+                testResult.getProject(projectId) shouldNotBeNull {
+                    val subProjectIds = navigator.projectDependencies(this, matcher = MATCH_SUB_PROJECTS)
+
+                    subProjectIds should containExactly(PROJECT_ID)
+                }
+            }
         }
 
         "getShortestPaths" should {
@@ -263,7 +289,7 @@ abstract class AbstractDependencyNavigatorTest : WordSpec() {
                             Identifier("Maven:com.typesafe.akka:akka-stream_2.12:2.5.6")
                         ),
                         Identifier("Maven:net.logstash.logback:logstash-logback-encoder:4.11") to emptyList(),
-                        Identifier("Maven:org.scala-lang:scala-library:2.12.3") to emptyList(),
+                        Identifier("Maven:org.scala-lang:scala-library:2.12.15") to emptyList(),
                         Identifier("Maven:org.scala-lang:scala-reflect:2.12.2") to listOf(
                             Identifier("Maven:com.typesafe.scala-logging:scala-logging_2.12:3.7.2")
                         ),
@@ -277,54 +303,8 @@ abstract class AbstractDependencyNavigatorTest : WordSpec() {
                         Identifier("Maven:org.slf4j:jcl-over-slf4j:1.7.25") to emptyList(),
                         Identifier("Maven:org.slf4j:slf4j-api:1.7.25") to listOf(
                             Identifier("Maven:ch.qos.logback:logback-classic:1.2.3")
-                        ),
+                        )
                     )
-                }
-            }
-        }
-
-        "projectDependencies" should {
-            "return the dependencies of a project" {
-                val scopeDependencies = navigator.scopeDependencies(testProject)
-                val projectDependencies = navigator.projectDependencies(testProject)
-
-                scopeDependencies.keys should containExactlyInAnyOrder("compile", "test")
-                val expectedDependencies = scopeDependencies.getValue("compile") + scopeDependencies.getValue("test")
-                projectDependencies should containExactlyInAnyOrder(expectedDependencies)
-            }
-
-            "support filtering the dependencies of a project" {
-                val dependencies = navigator.projectDependencies(testProject, 1) {
-                    it.linkage != PackageLinkage.PROJECT_DYNAMIC
-                }
-
-                dependencies should containExactlyInAnyOrder(
-                    Identifier("Maven:ch.qos.logback:logback-classic:1.2.3"),
-                    Identifier("Maven:com.typesafe:config:1.3.1"),
-                    Identifier("Maven:com.typesafe.akka:akka-stream_2.12:2.5.6"),
-                    Identifier("Maven:com.typesafe.scala-logging:scala-logging_2.12:3.7.2"),
-                    Identifier("Maven:net.logstash.logback:logstash-logback-encoder:4.11"),
-                    Identifier("Maven:org.scala-lang:scala-library:2.12.3"),
-                    Identifier("Maven:org.slf4j:jcl-over-slf4j:1.7.25"),
-                    Identifier("Maven:org.scalacheck:scalacheck_2.12:1.13.5"),
-                    Identifier("Maven:org.scalatest:scalatest_2.12:3.0.4")
-                )
-            }
-
-            "return no dependencies for a maxDepth of 0" {
-                val dependencies = navigator.projectDependencies(testProject, 0)
-
-                dependencies should beEmpty()
-            }
-        }
-
-        "collectSubProjects" should {
-            "find all the sub projects of a project" {
-                val projectId = Identifier("SBT:com.pbassiner:multi1_2.12:0.1-SNAPSHOT")
-                testResult.getProject(projectId) shouldNotBeNull {
-                    val subProjectIds = navigator.collectSubProjects(this)
-
-                    subProjectIds should containExactly(PROJECT_ID)
                 }
             }
         }
@@ -342,28 +322,31 @@ abstract class AbstractDependencyNavigatorTest : WordSpec() {
 
         "projectIssues" should {
             "return the issues of a project" {
-                val ortResultWithIssues = File(resultWithIssuesFileName).readValue<OrtResult>()
-                val project = ortResultWithIssues.analyzer?.result?.projects.orEmpty().first()
+                val ortResultWithIssues = readResourceValue<OrtResult>(resultWithIssuesFileName)
                 val navigator = ortResultWithIssues.dependencyNavigator
+                val projectIdWithIssues = Identifier("SBT:com.pbassiner:common_2.12:0.1-SNAPSHOT")
+                val project = ortResultWithIssues.getProject(projectIdWithIssues)
 
-                val issues = navigator.projectIssues(project)
+                project shouldNotBeNull {
+                    val issues = navigator.projectIssues(this)
 
-                issues should containExactlyEntries(
-                    Identifier("Maven:org.scala-lang.modules:scala-java8-compat_2.12:0.8.0") to setOf(
-                        OrtIssue(
-                            Instant.EPOCH,
-                            "Gradle",
-                            "Test issue 1"
-                        )
-                    ),
-                    Identifier("Maven:org.scalactic:scalactic_2.12:3.0.4") to setOf(
-                        OrtIssue(
-                            Instant.EPOCH,
-                            "Gradle",
-                            "Test issue 2"
+                    issues should containExactlyEntries(
+                        Identifier("Maven:org.scala-lang.modules:scala-java8-compat_2.12:0.8.0") to setOf(
+                            Issue(
+                                Instant.EPOCH,
+                                "Gradle",
+                                "Test issue 1"
+                            )
+                        ),
+                        Identifier("Maven:org.scalactic:scalactic_2.12:3.0.4") to setOf(
+                            Issue(
+                                Instant.EPOCH,
+                                "Gradle",
+                                "Test issue 2"
+                            )
                         )
                     )
-                )
+                }
             }
         }
 
@@ -402,4 +385,4 @@ abstract class AbstractDependencyNavigatorTest : WordSpec() {
 }
 
 /** Identifier of the project used by the tests. */
-private val PROJECT_ID = Identifier("SBT:com.pbassiner:common_2.12:0.1-SNAPSHOT")
+private val PROJECT_ID = Identifier("SBT:com.pbassiner:common_2.12:0.1.0-SNAPSHOT")

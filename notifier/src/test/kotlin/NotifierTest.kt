@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2022 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,10 +23,10 @@ import io.kotest.assertions.assertSoftly
 import io.kotest.assertions.throwables.shouldNotThrow
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.WordSpec
-import io.kotest.matchers.types.shouldBeInstanceOf
+import io.kotest.matchers.should
+import io.kotest.matchers.types.beInstanceOf
 
-import kotlin.script.experimental.api.ResultValue
-
+import org.ossreviewtoolkit.model.NotifierRun
 import org.ossreviewtoolkit.model.config.JiraConfiguration
 import org.ossreviewtoolkit.model.config.NotifierConfiguration
 import org.ossreviewtoolkit.model.config.SendMailConfiguration
@@ -45,7 +45,7 @@ class NotifierTest : WordSpec({
                         resolutionProvider as ResolutionProvider
                         """.trimIndent()
                     )
-                    result.shouldBeInstanceOf<ResultValue.Value>()
+                    result should beInstanceOf<NotifierRun>()
                 }
 
                 shouldThrow<RuntimeException> {
@@ -65,7 +65,7 @@ class NotifierTest : WordSpec({
                         resolutionProvider as ResolutionProvider
                         """.trimIndent()
                     )
-                    result.shouldBeInstanceOf<ResultValue.Value>()
+                    result should beInstanceOf<NotifierRun>()
                 }
             }
         }

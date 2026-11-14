@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,11 +19,14 @@
 
 package org.ossreviewtoolkit.analyzer
 
+import com.fasterxml.jackson.databind.annotation.JsonSerialize
+
 import java.io.File
 
 import org.ossreviewtoolkit.model.DependencyGraph
 import org.ossreviewtoolkit.model.Package
 import org.ossreviewtoolkit.model.ProjectAnalyzerResult
+import org.ossreviewtoolkit.model.utils.PackageSortedSetConverter
 
 /**
  * A data class representing the result of the execution of a [PackageManager]. An instance contains the single
@@ -31,9 +34,7 @@ import org.ossreviewtoolkit.model.ProjectAnalyzerResult
  * is shared between the single project results), they are stored here as well.
  */
 data class PackageManagerResult(
-    /**
-     * A map with the [ProjectAnalyzerResult]s created for the single definition files.
-     */
+    /** A map with the [ProjectAnalyzerResult]s created for the single definition files. */
     val projectResults: Map<File, List<ProjectAnalyzerResult>>,
 
     /**
@@ -48,5 +49,6 @@ data class PackageManagerResult(
      * produce a shared [DependencyGraph] typically do not collect packages on a project-level, but globally. Such
      * packages can be stored in this property.
      */
-    val sharedPackages: Set<Package> = sortedSetOf()
+    @JsonSerialize(converter = PackageSortedSetConverter::class)
+    val sharedPackages: Set<Package> = emptySet()
 )

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2022 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,9 +27,7 @@ import kotlinx.serialization.json.decodeFromStream
  * https://www.osadl.org/Access-to-raw-data.oss-compliance-raw-data-access.0.html.
  */
 object CompatibilityMatrix {
-    /**
-     * A class to represent the information contained in a cell of the matrix, i.e. the result of a lookup.
-     */
+    /** A class to represent the information contained in a cell of the matrix, i.e. the result of a lookup. */
     data class Info(
         val compatibility: Compatibility,
         val explanation: String
@@ -43,9 +41,14 @@ object CompatibilityMatrix {
     }
 
     private val matrix by lazy {
-        javaClass.getResourceAsStream("/rules/osadl-matrix-with-explanations.json").use {
-            Json.Default.decodeFromStream<MatrixLicenses>(it)
-        }.licenses.associate { row ->
+        javaClass.getResourceAsStream("/rules/matrixseqexpl.json").use {
+            val json = checkNotNull(it)
+            Json.decodeFromStream<MatrixLicenses>(json)
+        }
+    }
+
+    private val licenses by lazy {
+        matrix.licenses.associate { row ->
             // Use names as keys for faster lookup.
             row.name to row.compatibilities.associate { it.name to Info(it.compatibility, it.explanation) }
         }
@@ -56,5 +59,5 @@ object CompatibilityMatrix {
      * outbound license) and [subordinateLicense] (e.g. inbound license).
      */
     fun getCompatibilityInfo(leadingLicense: String, subordinateLicense: String): Info =
-        matrix[leadingLicense]?.get(subordinateLicense) ?: Info.NOT_AVAILABLE
+        licenses[leadingLicense]?.get(subordinateLicense) ?: Info.NOT_AVAILABLE
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2020 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,17 +22,36 @@
 package org.ossreviewtoolkit.clients.fossid
 
 import java.io.File
+import java.nio.ByteBuffer
 
+import kotlin.io.encoding.Base64
+
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+
+import okio.BufferedSink
 import okio.buffer
 import okio.sink
 
+import org.apache.logging.log4j.kotlin.logger
+
+import org.ossreviewtoolkit.clients.fossid.model.CreateScanResponse
+import org.ossreviewtoolkit.clients.fossid.model.RemoveUploadContentResponse
+import org.ossreviewtoolkit.clients.fossid.model.identification.common.LicenseMatchType
 import org.ossreviewtoolkit.clients.fossid.model.report.ReportType
 import org.ossreviewtoolkit.clients.fossid.model.report.SelectionType
+import org.ossreviewtoolkit.clients.fossid.model.result.MatchedLines
+import org.ossreviewtoolkit.clients.fossid.model.result.Snippet
 import org.ossreviewtoolkit.clients.fossid.model.rules.RuleScope
 import org.ossreviewtoolkit.clients.fossid.model.rules.RuleType
 
 internal const val SCAN_GROUP = "scans"
+private const val FILES_AND_FOLDERS_GROUP = "files_and_folders"
 private const val PROJECT_GROUP = "projects"
+private val APPLICATION_OCTET_STREAM_MEDIA_TYPE = "application/octet-stream".toMediaType()
+private const val UPLOAD_MAX_FILE_SIZE = 8 * 1024 * 1024 // Default max file size defined in the FossID Workbench agent.
+private const val UPLOAD_CHUNK_SIZE = 5 * 1024 * 1024 // Default chunk size defined in the FossID Workbench agent.
 
 /**
  * Verify that a request for the given [operation] was successful. [operation] is a free label describing the operation.
@@ -43,12 +62,12 @@ fun <B : EntityResponseBody<T>, T> B?.checkResponse(operation: String, withDataC
     requireNotNull(this)
 
     require(error == null) {
-        "Could not '$operation'. Additional information : $error"
+        "Could not '$operation'. Additional information: $error"
     }
 
     if (withDataCheck) {
         requireNotNull(data) {
-            "No Payload received for '$operation'. Additional information: $error"
+            "No Payload received for '$operation'."
         }
     }
 
@@ -61,7 +80,7 @@ fun <B : EntityResponseBody<T>, T> B?.checkResponse(operation: String, withDataC
  */
 suspend fun FossIdRestService.getFossIdVersion(): String? {
     // TODO: replace with an API call when FossID provides a function (starting at version 2021.2).
-    val regex = Regex("^.*fossid.css\\?v=([0-9.]+).*\$")
+    val regex = Regex("^.*fossid.css\\?v=([0-9.]+).*$")
 
     getLoginPage().charStream().buffered().useLines { lines ->
         lines.forEach { line ->
@@ -81,6 +100,26 @@ suspend fun FossIdRestService.getFossIdVersion(): String? {
 suspend fun FossIdRestService.getProject(user: String, apiKey: String, projectCode: String) =
     getProject(
         PostRequestBody("get_information", PROJECT_GROUP, user, apiKey, mapOf("project_code" to projectCode))
+    )
+
+/**
+ * Get all projects available in this instance.
+ *
+ * The HTTP request is sent with [user] and [apiKey] as credentials.
+ */
+suspend fun FossIdRestService.listProjects(user: String, apiKey: String) =
+    listProjects(
+        PostRequestBody("list_projects", PROJECT_GROUP, user, apiKey, emptyMap())
+    )
+
+/**
+ * Get the scan for the given [scanCode].
+ *
+ * The HTTP request is sent with [user] and [apiKey] as credentials.
+ */
+suspend fun FossIdRestService.getScan(user: String, apiKey: String, scanCode: String) =
+    getScan(
+        PostRequestBody("get_information", SCAN_GROUP, user, apiKey, mapOf("scan_code" to scanCode))
     )
 
 /**
@@ -104,20 +143,19 @@ suspend fun FossIdRestService.createProject(
     projectCode: String,
     projectName: String,
     comment: String = "Created by ORT"
-) =
-    createProject(
-        PostRequestBody(
-            "create",
-            PROJECT_GROUP,
-            user,
-            apiKey,
-            mapOf(
-                "project_code" to projectCode,
-                "project_name" to projectName,
-                "comment" to comment
-            )
+) = createProject(
+    PostRequestBody(
+        "create",
+        PROJECT_GROUP,
+        user,
+        apiKey,
+        mapOf(
+            "project_code" to projectCode,
+            "project_name" to projectName,
+            "comment" to comment
         )
     )
+)
 
 /**
  * Create a new scan of [gitRepoUrl]/[gitBranch] for the given [projectCode].
@@ -129,24 +167,27 @@ suspend fun FossIdRestService.createScan(
     apiKey: String,
     projectCode: String,
     scanCode: String,
-    gitRepoUrl: String,
-    gitBranch: String
-): MapResponseBody<String> =
-    createScan(
+    gitRepoUrl: String? = null,
+    gitBranch: String? = null,
+    comment: String = ""
+): PolymorphicDataResponseBody<CreateScanResponse> {
+    val options = buildMap {
+        put("project_code", projectCode)
+        put("scan_code", scanCode)
+        put("scan_name", scanCode)
+        put("comment", comment)
+
+        if (gitRepoUrl != null) put("git_repo_url", gitRepoUrl)
+
+        if (gitBranch != null) put("git_branch", gitBranch)
+    }
+
+    return createScan(
         PostRequestBody(
-            "create",
-            SCAN_GROUP,
-            user,
-            apiKey,
-            mapOf(
-                "project_code" to projectCode,
-                "scan_code" to scanCode,
-                "scan_name" to scanCode,
-                "git_repo_url" to gitRepoUrl,
-                "git_branch" to gitBranch
-            )
+            "create", SCAN_GROUP, user, apiKey, options
         )
     )
+}
 
 /**
  * Trigger a scan with the given [scanCode]. Additional [options] can be passed to FossID.
@@ -188,7 +229,7 @@ suspend fun FossIdRestService.deleteScan(user: String, apiKey: String, scanCode:
                 "scan_code" to scanCode,
                 "delete_identifications" to "1"
             )
-         )
+        )
     )
 
 /**
@@ -228,6 +269,54 @@ suspend fun FossIdRestService.listScanResults(user: String, apiKey: String, scan
     listScanResults(
         PostRequestBody("get_results", SCAN_GROUP, user, apiKey, mapOf("scan_code" to scanCode))
     )
+
+/**
+ * List the snippets for the given file with [path] for the given [scanCode].
+ *
+ * The HTTP request is sent with [user] and [apiKey] as credentials.
+ */
+suspend fun FossIdRestService.listSnippets(
+    user: String,
+    apiKey: String,
+    scanCode: String,
+    path: String
+): PolymorphicResponseBody<Snippet> {
+    val base64Path = Base64.encode(path.toByteArray())
+    return listSnippets(
+        PostRequestBody(
+            "get_fossid_results",
+            FILES_AND_FOLDERS_GROUP,
+            user,
+            apiKey,
+            mapOf("scan_code" to scanCode, "path" to base64Path)
+        )
+    )
+}
+
+/**
+ * List matched lines for the given file with [path] and the given [scanCode], which the given [snippetId]. The
+ * corresponding snippet must have a partial match type, otherwise an error is returned by FossID.
+ *
+ * The HTTP request is sent with [user] and [apiKey] as credentials.
+ */
+suspend fun FossIdRestService.listMatchedLines(
+    user: String,
+    apiKey: String,
+    scanCode: String,
+    path: String,
+    snippetId: Int
+): PolymorphicDataResponseBody<MatchedLines> {
+    val base64Path = Base64.encode(path.toByteArray())
+    return listMatchedLines(
+        PostRequestBody(
+            "get_matched_lines",
+            FILES_AND_FOLDERS_GROUP,
+            user,
+            apiKey,
+            mapOf("scan_code" to scanCode, "path" to base64Path, "client_result_id" to "$snippetId")
+        )
+    )
+}
 
 /**
  * List the files that have been manually marked as identified for the given [scanCode].
@@ -305,21 +394,20 @@ suspend fun FossIdRestService.createIgnoreRule(
     type: RuleType,
     value: String,
     scope: RuleScope
-) =
-    createIgnoreRule(
-        PostRequestBody(
-            "ignore_rules_add",
-            SCAN_GROUP,
-            user,
-            apiKey,
-            mapOf(
-                "scan_code" to scanCode,
-                "type" to type.name.lowercase(),
-                "value" to value,
-                "apply_to" to scope.name.lowercase()
-            )
+) = createIgnoreRule(
+    PostRequestBody(
+        "ignore_rules_add",
+        SCAN_GROUP,
+        user,
+        apiKey,
+        mapOf(
+            "scan_code" to scanCode,
+            "type" to type.name.lowercase(),
+            "value" to value,
+            "apply_to" to scope.name.lowercase()
         )
     )
+)
 
 /**
  * Ask the FossID server to generate a [reportType] report containing [selectionType]. The report will be generated in
@@ -359,7 +447,7 @@ suspend fun FossIdRestService.generateReport(
             contentDisposition?.split(';')?.firstNotNullOfOrNull {
                 it.trim().withoutPrefix("filename=")?.removeSurrounding("\"")
             } ?: return Result.failure<File>(IllegalStateException("Cannot determine name of the report")).also {
-                FossIdRestService.logger.error {
+                logger.error {
                     "Cannot determine name of the report with raw headers '$contentDisposition'."
                 }
             }
@@ -385,7 +473,315 @@ suspend fun FossIdRestService.generateReport(
 }
 
 /**
- * If this string starts with [prefix], return the string without the prefix, otherwise return [missingPrefixValue].
+ * Mark the given file with [path] as identified for the given [scanCode].
+ *
+ * The HTTP request is sent with [user] and [apiKey] as credentials.
  */
+suspend fun FossIdRestService.markAsIdentified(
+    user: String,
+    apiKey: String,
+    scanCode: String,
+    path: String,
+    isDirectory: Boolean
+): EntityResponseBody<Nothing> {
+    val base64Path = Base64.encode(path.toByteArray())
+    val directoryFlag = if (isDirectory) "1" else "0"
+    return markAsIdentified(
+        PostRequestBody(
+            "mark_as_identified",
+            FILES_AND_FOLDERS_GROUP,
+            user,
+            apiKey,
+            mapOf("scan_code" to scanCode, "path" to base64Path, "is_directory" to directoryFlag)
+        )
+    )
+}
+
+/**
+ * Unmark the given file with [path] as identified for the given [scanCode].
+ *
+ * The HTTP request is sent with [user] and [apiKey] as credentials.
+ */
+suspend fun FossIdRestService.unmarkAsIdentified(
+    user: String,
+    apiKey: String,
+    scanCode: String,
+    path: String,
+    isDirectory: Boolean
+): EntityResponseBody<Nothing> {
+    val base64Path = Base64.encode(path.toByteArray())
+    val directoryFlag = if (isDirectory) "1" else "0"
+    return unmarkAsIdentified(
+        PostRequestBody(
+            "unmark_as_identified",
+            FILES_AND_FOLDERS_GROUP,
+            user,
+            apiKey,
+            mapOf("scan_code" to scanCode, "path" to base64Path, "is_directory" to directoryFlag)
+        )
+    )
+}
+
+/**
+ * Add license identification [licenseIdentifier] to file with [path] for the given [scanCode].
+ *
+ * The HTTP request is sent with [user] and [apiKey] as credentials.
+ */
+suspend fun FossIdRestService.addLicenseIdentification(
+    user: String,
+    apiKey: String,
+    scanCode: String,
+    path: String,
+    licenseIdentifier: String,
+    identificationOn: LicenseMatchType,
+    isDirectory: Boolean
+): EntityResponseBody<Nothing> {
+    val base64Path = Base64.encode(path.toByteArray())
+    val directoryFlag = if (isDirectory) "1" else "0"
+    return addLicenseIdentification(
+        PostRequestBody(
+            "add_license_identification",
+            FILES_AND_FOLDERS_GROUP,
+            user,
+            apiKey,
+            mapOf(
+                "scan_code" to scanCode,
+                "path" to base64Path,
+                "license_identifier" to licenseIdentifier,
+                "identification_on" to identificationOn.name.lowercase(),
+                "is_directory" to directoryFlag
+            )
+        )
+    )
+}
+
+/**
+ * Add component identification for component [componentName]/[componentVersion] to file with [path] for the given
+ * [scanCode]. If [preserveExistingIdentifications] is true, identification is appended, otherwise it replaces existing
+ * identifications.
+ *
+ * The HTTP request is sent with [user] and [apiKey] as credentials.
+ */
+@Suppress("LongParameterList")
+suspend fun FossIdRestService.addComponentIdentification(
+    user: String,
+    apiKey: String,
+    scanCode: String,
+    path: String,
+    componentName: String,
+    componentVersion: String,
+    isDirectory: Boolean,
+    preserveExistingIdentifications: Boolean = true
+): EntityResponseBody<Nothing> {
+    val base64Path = Base64.encode(path.toByteArray())
+    val directoryFlag = if (isDirectory) "1" else "0"
+    val preserveExistingIdentificationsFlag = if (preserveExistingIdentifications) "1" else "0"
+    return addComponentIdentification(
+        PostRequestBody(
+            "set_identification_component",
+            FILES_AND_FOLDERS_GROUP,
+            user,
+            apiKey,
+            mapOf(
+                "scan_code" to scanCode,
+                "path" to base64Path,
+                "is_directory" to directoryFlag,
+                "component_name" to componentName,
+                "component_version" to componentVersion,
+                "preserve_existing_identifications" to preserveExistingIdentificationsFlag
+            )
+        )
+    )
+}
+
+/**
+ * Add a [comment] to file with [path] for the given [scanCode].
+ *
+ * The HTTP request is sent with [user] and [apiKey] as credentials.
+ */
+suspend fun FossIdRestService.addFileComment(
+    user: String,
+    apiKey: String,
+    scanCode: String,
+    path: String,
+    comment: String,
+    isImportant: Boolean = false,
+    includeInReport: Boolean = false
+): EntityResponseBody<Nothing> {
+    val base64Path = Base64.encode(path.toByteArray())
+    val isImportantFlag = if (isImportant) "1" else "0"
+    val includeInReportFlag = if (includeInReport) "1" else "0"
+    return addFileComment(
+        PostRequestBody(
+            "add_file_comment",
+            FILES_AND_FOLDERS_GROUP,
+            user,
+            apiKey,
+            mapOf(
+                "scan_code" to scanCode,
+                "path" to base64Path,
+                "comment" to comment,
+                "is_important" to isImportantFlag,
+                "include_in_report" to includeInReportFlag
+            )
+        )
+    )
+}
+
+/**
+ * Check uploaded files for archives and decompress them. If [fileName] is specified, only this file is extracted.
+ * If [recursivelyExtractArchives] is specified, also extract archives inside the extracted files.
+ * If [jarFileExtraction] is specified, also extract JAR files.
+ *
+ * The HTTP request is sent with [user] and [apiKey] as credentials.
+ */
+suspend fun FossIdRestService.extractArchives(
+    user: String,
+    apiKey: String,
+    scanCode: String,
+    fileName: String? = null,
+    recursivelyExtractArchives: Boolean = false,
+    extractToDirectory: Boolean = true,
+    jarFileExtraction: Boolean = false
+): EntityResponseBody<Boolean> {
+    val recursivelyExtractArchivesFlag = if (recursivelyExtractArchives) "1" else "0"
+    val extractToDirectoryFlag = if (extractToDirectory) "1" else "0"
+    val jarFileExtractionFlag = if (jarFileExtraction) "1" else "0"
+    val baseOptions = mapOf(
+        "scan_code" to scanCode,
+        "recursively_extract_archives" to recursivelyExtractArchivesFlag,
+        "extract_to_directory" to extractToDirectoryFlag,
+        "jar_file_extraction" to jarFileExtractionFlag
+    )
+    return extractArchives(
+        PostRequestBody(
+            "extract_archives",
+            SCAN_GROUP,
+            user,
+            apiKey,
+            if (fileName == null) {
+                baseOptions
+            } else {
+                baseOptions + mapOf("filename" to fileName)
+            }
+        )
+    )
+}
+
+/**
+ * Remove uploaded content for the given [scanCode]. If [fileName] is specified, only this file is removed.
+ * Please note that it removes all uploaded content, the archive and the extracted files.
+ * The HTTP request is sent with [user] and [apiKey] as credentials.
+ */
+suspend fun FossIdRestService.removeUploadedContent(
+    user: String,
+    apiKey: String,
+    scanCode: String,
+    fileName: String? = null
+): PolymorphicDataResponseBody<RemoveUploadContentResponse> {
+    val baseOptions = mapOf("scan_code" to scanCode)
+    return removeUploadedContent(
+        PostRequestBody(
+            "remove_uploaded_content",
+            SCAN_GROUP,
+            user,
+            apiKey,
+            if (fileName == null) {
+                baseOptions
+            } else {
+                baseOptions + mapOf("filename" to fileName)
+            }
+        )
+    )
+}
+
+/**
+ * Upload a file to the given [scanCode] on the FossID server. If the file is bigger than [UPLOAD_MAX_FILE_SIZE] bytes
+ * or if [forceChunkedUpload] is true, the file is uploaded in chunks of [chunkSize] bytes.
+ *
+ * When a chunk of the file is uploaded, the server expects a Transfer-Encoding header with the value "chunked". Please
+ * note that this is not the transfer encoding defined by the RFC 9112 §7.1: The body of the request doesn't contain the
+ * chunk size nor the chunk delimiter, but only the raw bytes of the file chunk (see
+ * https://en.wikipedia.org/wiki/Chunked_transfer_encoding).
+ *
+ * The HTTP request is sent with [user] and [apiKey] as credentials.
+ */
+suspend fun FossIdRestService.uploadFile(
+    user: String,
+    apiKey: String,
+    scanCode: String,
+    file: File,
+    chunkSize: Int = UPLOAD_CHUNK_SIZE,
+    forceChunkedUpload: Boolean = false
+): EntityResponseBody<Nothing> {
+    require(file.isFile) { "The file '$file' does not exist or is not a regular file." }
+
+    val scanCodeB64 = Base64.encode(scanCode.toByteArray())
+    val fileName = Base64.encode(file.name.toByteArray())
+    val basicAuthHeaderValue = Base64.encode("$user:$apiKey".toByteArray())
+    return if (file.length() > UPLOAD_MAX_FILE_SIZE || forceChunkedUpload) {
+        logger.info {
+            "File '${file.absolutePath}' with size ${file.length()} will be uploaded in chunked mode."
+        }
+
+        val buffer = ByteBuffer.allocate(chunkSize)
+        var chunkCount = 0
+
+        file.inputStream().use {
+            var read = it.channel.read(buffer)
+
+            while (read != -1) {
+                val array = ByteArray(read)
+                buffer.flip().get(array)
+
+                logger.info {
+                    "Uploading chunk #${chunkCount++} of file ${file.absolutePath}..."
+                }
+
+                // Here, array.toRequestBody(contentType) should be used to create the request body, but when a request
+                // body has a content length different of -1, OkHttp removes the chunked transfer encoding header and
+                // set the content length header instead. Therefore, a special RequestBody has to be created instead.
+                // See https://github.com/square/retrofit/issues/1315.
+                val requestBody = object : RequestBody() {
+                    override fun contentType() = APPLICATION_OCTET_STREAM_MEDIA_TYPE
+
+                    override fun contentLength() = -1L
+
+                    override fun writeTo(sink: BufferedSink) {
+                        sink.write(array, 0, array.size)
+                    }
+                }
+
+                val response = uploadFile(
+                    scanCodeB64,
+                    fileName,
+                    "Basic $basicAuthHeaderValue",
+                    "chunked",
+                    requestBody
+                )
+
+                response.checkResponse("upload file chunk", withDataCheck = false)
+                buffer.clear()
+                read = it.channel.read(buffer)
+            }
+        }
+
+        EntityResponseBody(status = 1)
+    } else {
+        logger.info {
+            "File '${file.absolutePath}' with size ${file.length()} will NOT be uploaded in chunked mode."
+        }
+
+        uploadFile(
+            scanCodeB64,
+            fileName,
+            "Basic $basicAuthHeaderValue",
+            "",
+            file.readBytes().toRequestBody(APPLICATION_OCTET_STREAM_MEDIA_TYPE)
+        )
+    }
+}
+
+/** If this string starts with [prefix], return the string without the prefix, otherwise return [missingPrefixValue]. */
 fun String?.withoutPrefix(prefix: String, missingPrefixValue: () -> String? = { null }): String? =
     this?.removePrefix(prefix)?.takeIf { it != this } ?: missingPrefixValue()

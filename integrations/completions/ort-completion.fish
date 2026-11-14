@@ -3,30 +3,29 @@
 
 
 ### Setup for ort
-set -l ort_subcommands 'advise analyze config download evaluate notify report requirements scan upload-curations upload-result-to-postgres upload-result-to-sw360'
+set -l ort_subcommands 'advise analyze compare config download evaluate migrate notify plugins report requirements scan upload-curations upload-result-to-postgres'
 
 ## Options for ort
 complete -c ort -n "not __fish_seen_subcommand_from $ort_subcommands" -l config -s c -r -F -d 'The path to a configuration file.'
-complete -c ort -n "not __fish_seen_subcommand_from $ort_subcommands" -l info -l debug -d 'Set the verbosity level of log output.'
+complete -c ort -n "not __fish_seen_subcommand_from $ort_subcommands" -l error -l warn -l info -l debug -d 'Set the verbosity level of log output.'
 complete -c ort -n "not __fish_seen_subcommand_from $ort_subcommands" -l stacktrace -d 'Print out the stacktrace for all exceptions.'
-complete -c ort -n "not __fish_seen_subcommand_from $ort_subcommands" -s P -r -d 'Override a key-value pair in the configuration file. For example: -P ort.scanner.storages.postgres.schema=testSchema'
-complete -c ort -n "not __fish_seen_subcommand_from $ort_subcommands" -l force-overwrite -d 'Overwrite any output files if they already exist.'
+complete -c ort -n "not __fish_seen_subcommand_from $ort_subcommands" -s P -r -d 'Override a key-value pair in the configuration file. For example: -P ort.scanner.storages.postgres.connection.schema=testSchema'
 complete -c ort -n "not __fish_seen_subcommand_from $ort_subcommands" -l help-all -d 'Display help for all subcommands.'
-complete -c ort -n "not __fish_seen_subcommand_from $ort_subcommands" -l generate-completion
+complete -c ort -n "not __fish_seen_subcommand_from $ort_subcommands" -l generate-completion -r
 complete -c ort -n "not __fish_seen_subcommand_from $ort_subcommands" -l version -s v -d 'Show the version and exit.'
 complete -c ort -n "not __fish_seen_subcommand_from $ort_subcommands" -s h -l help -d 'Show this message and exit'
 
 
 ### Setup for advise
-complete -c ort -f -n __fish_use_subcommand -a advise -d 'Check dependencies for security vulnerabilities.'
+complete -c ort -f -n __fish_use_subcommand -a advise -d 'Check dependencies for security vulnerabilities and project health metrics.'
 
 ## Options for advise
 complete -c ort -n "__fish_seen_subcommand_from advise" -l ort-file -s i -r -F -d 'An ORT result file with an analyzer result to use.'
 complete -c ort -n "__fish_seen_subcommand_from advise" -l output-dir -s o -r -F -d 'The directory to write the ORT result file with advisor results to.'
-complete -c ort -n "__fish_seen_subcommand_from advise" -l output-formats -s f -r -fa "JSON XML YAML" -d 'The list of output formats to be used for the ORT result file(s).'
+complete -c ort -n "__fish_seen_subcommand_from advise" -l output-formats -s f -r -fa "JSON YAML" -d 'The list of output formats to be used for the ORT result file(s).'
 complete -c ort -n "__fish_seen_subcommand_from advise" -l label -s l -r -d 'Set a label in the ORT result, overwriting any existing label of the same name. Can be used multiple times. For example: --label distribution=external'
 complete -c ort -n "__fish_seen_subcommand_from advise" -l resolutions-file -r -F -d 'A file containing issue and rule violation resolutions.'
-complete -c ort -n "__fish_seen_subcommand_from advise" -l advisors -s a -r -d 'The comma-separated advisors to use, any of [GitHubDefects, NexusIQ, OssIndex, OSV, VulnerableCode].'
+complete -c ort -n "__fish_seen_subcommand_from advise" -l advisors -s a -r -d 'The comma-separated advisors to use, any of [BlackDuck, Crossd, OSSIndex, OSV, ScanOss, Scorecard, VulnerableCode].'
 complete -c ort -n "__fish_seen_subcommand_from advise" -l skip-excluded -d 'Do not check excluded projects or packages.'
 complete -c ort -n "__fish_seen_subcommand_from advise" -s h -l help -d 'Show this message and exit'
 
@@ -35,29 +34,41 @@ complete -c ort -n "__fish_seen_subcommand_from advise" -s h -l help -d 'Show th
 complete -c ort -f -n __fish_use_subcommand -a analyze -d 'Determine dependencies of a software project.'
 
 ## Options for analyze
-complete -c ort -n "__fish_seen_subcommand_from analyze" -l input-dir -s i -r -F -d 'The project directory to analyze. As a special case, if only one package manager is activated, this may point to a definition file for that package manager to only analyze that single project.'
-complete -c ort -n "__fish_seen_subcommand_from analyze" -l output-dir -s o -r -F -d 'The directory to write the ORT result file with analyzer results to.'
-complete -c ort -n "__fish_seen_subcommand_from analyze" -l output-formats -s f -r -fa "JSON XML YAML" -d 'The list of output formats to be used for the ORT result file(s).'
-complete -c ort -n "__fish_seen_subcommand_from analyze" -l package-curations-file -r -F -d 'A file containing package curation data.'
-complete -c ort -n "__fish_seen_subcommand_from analyze" -l package-curations-dir -r -F -d 'A directory containing package curation data.'
-complete -c ort -n "__fish_seen_subcommand_from analyze" -l repository-configuration-file -r -F -d 'A file containing the repository configuration. If set, the \'.ort.yml\' file from the repository is ignored.'
+complete -c ort -n "__fish_seen_subcommand_from analyze" -l input-dir -s i -r -F -d 'The project directory to analyze. May point to a definition file, but only if just a single packagemanager is enabled, and the definition file does not depend on any further definition files.'
+complete -c ort -n "__fish_seen_subcommand_from analyze" -l output-dir -s o -r -F -d 'The directory to write the ORT result file with analyzer results to. Required unless \'--dry-run\' is specified.'
+complete -c ort -n "__fish_seen_subcommand_from analyze" -l output-formats -s f -r -fa "JSON YAML" -d 'The list of output formats to be used for the ORT result file(s).'
+complete -c ort -n "__fish_seen_subcommand_from analyze" -l repository-configuration-file -r -F -d 'A file containing the repository configuration. If set, overrides any repository configuration contained in a \'.ort.yml\' file in the repository.'
 complete -c ort -n "__fish_seen_subcommand_from analyze" -l resolutions-file -r -F -d 'A file containing issue and rule violation resolutions.'
-complete -c ort -n "__fish_seen_subcommand_from analyze" -l clearly-defined-curations -d 'Whether to fall back to package curation data from the ClearlyDefine service or not.'
-complete -c ort -n "__fish_seen_subcommand_from analyze" -l ort-curations -d 'Whether to fall back to package curation data from the ort-config repository or not.'
-complete -c ort -n "__fish_seen_subcommand_from analyze" -l sw360-curations -d 'Whether to fall back to package curation data from the SW360 service or not.'
 complete -c ort -n "__fish_seen_subcommand_from analyze" -l label -s l -r -d 'Set a label in the ORT result, overwriting any existing label of the same name. Can be used multiple times. For example: --label distribution=external'
-complete -c ort -n "__fish_seen_subcommand_from analyze" -l package-managers -s m -r -d 'The comma-separated package managers to activate, any of [Bower, Bundler, Cargo, Carthage, CocoaPods, Composer, Conan, DotNet, GoDep, GoMod, Gradle, Maven, NPM, NuGet, PIP, Pipenv, PNPM, Poetry, Pub, SBT, SpdxDocumentFile, Stack, Unmanaged, Yarn, Yarn2]. Note that deactivation overrides activation. If set, package manager activation settings from configuration files are ignored.'
-complete -c ort -n "__fish_seen_subcommand_from analyze" -l not-package-managers -s n -r -d 'The comma-separated package managers to deactivate, any of [Bower, Bundler, Cargo, Carthage, CocoaPods, Composer, Conan, DotNet, GoDep, GoMod, Gradle, Maven, NPM, NuGet, PIP, Pipenv, PNPM, Poetry, Pub, SBT, SpdxDocumentFile, Stack, Unmanaged, Yarn, Yarn2]. Note that deactivation overrides activation. If set, package manager activation settings from configuration files are ignored.'
+complete -c ort -n "__fish_seen_subcommand_from analyze" -l dry-run -d 'Do not actually run the project analysis but only show the package managers that would be used.'
 complete -c ort -n "__fish_seen_subcommand_from analyze" -s h -l help -d 'Show this message and exit'
 
 
+### Setup for compare
+complete -c ort -f -n __fish_use_subcommand -a compare -d 'Compare two ORT results with various methods.'
+
+## Options for compare
+complete -c ort -n "__fish_seen_subcommand_from compare" -l method -s m -r -fa "SEMANTIC_DIFF TEXT_DIFF" -d 'The method to use when comparing ORT results. Must be one of [SEMANTIC_DIFF, TEXT_DIFF].'
+complete -c ort -n "__fish_seen_subcommand_from compare" -l context-size -s C -r -d 'The number of unmodified lines to display in the context of a modified line. Only applies to unified diff output.'
+complete -c ort -n "__fish_seen_subcommand_from compare" -l ignore-time -s t -d 'Ignore time differences.'
+complete -c ort -n "__fish_seen_subcommand_from compare" -l ignore-environment -s e -d 'Ignore environment differences.'
+complete -c ort -n "__fish_seen_subcommand_from compare" -l ignore-tool-versions -s v -d 'Ignore tool version differences.'
+complete -c ort -n "__fish_seen_subcommand_from compare" -l ignore-tmp-dir -s d -d 'Ignore temporary directory differences.'
+complete -c ort -n "__fish_seen_subcommand_from compare" -s h -l help -d 'Show this message and exit'
+
+## Arguments for compare
+complete -c ort -n "__fish_seen_subcommand_from compare" -F -d 'The first ORT result file to compare.'
+complete -c ort -n "__fish_seen_subcommand_from compare" -F -d 'The second ORT result file to compare.'
+
+
 ### Setup for config
-complete -c ort -f -n __fish_use_subcommand -a config -d 'Show different ORT configurations'
+complete -c ort -f -n __fish_use_subcommand -a config -d 'Show different ORT configurations.'
 
 ## Options for config
 complete -c ort -n "__fish_seen_subcommand_from config" -l show-default -d 'Show the default configuration used when no custom configuration is present.'
 complete -c ort -n "__fish_seen_subcommand_from config" -l show-active -d 'Show the active configuration used, including any custom configuration.'
 complete -c ort -n "__fish_seen_subcommand_from config" -l show-reference -d 'Show the reference configuration. This configuration is never actually used as it just contains example entries for all supported configuration options.'
+complete -c ort -n "__fish_seen_subcommand_from config" -l check-syntax -r -F -d 'Check the syntax of the given configuration file.'
 complete -c ort -n "__fish_seen_subcommand_from config" -s h -l help -d 'Show this message and exit'
 
 
@@ -70,13 +81,16 @@ complete -c ort -n "__fish_seen_subcommand_from download" -l project-url -r -d '
 complete -c ort -n "__fish_seen_subcommand_from download" -l project-name -r -d 'The speaking name of the project to download. For use together with \'--project-url\'. Ignored if \'--ort-file\' is also specified. (default: the last part of the project URL)'
 complete -c ort -n "__fish_seen_subcommand_from download" -l vcs-type -r -d 'The VCS type if \'--project-url\' points to a VCS. Ignored if \'--ort-file\' is also specified. (default: the VCS type detected by querying the project URL)'
 complete -c ort -n "__fish_seen_subcommand_from download" -l vcs-revision -r -d 'The VCS revision if \'--project-url\' points to a VCS. Ignored if \'--ort-file\' is also specified. (default: the VCS\'s default revision)'
-complete -c ort -n "__fish_seen_subcommand_from download" -l vcs-path -r -d 'The VCS path if \'--project-url\' points to a VCS. Ignored if \'--ort-file\' is also specified. (default: the empty root path)'
+complete -c ort -n "__fish_seen_subcommand_from download" -l vcs-path -r -d 'The VCS path to limit the checkout to if \'--project-url\' points to a VCS. Ignored if \'--ort-file\' is also specified. (default: no limitation, i.e. the root path is checked out)'
 complete -c ort -n "__fish_seen_subcommand_from download" -l license-classifications-file -r -F -d 'A file containing the license classifications that are used to limit downloads if the included categories are specified in the \'config.yml\' file. If not specified, all packages are downloaded.'
 complete -c ort -n "__fish_seen_subcommand_from download" -l output-dir -s o -r -F -d 'The output directory to download the source code to.'
 complete -c ort -n "__fish_seen_subcommand_from download" -l archive -d 'Archive the downloaded source code as ZIP files to the output directory. Is ignored if \'--project-url\' is also specified.'
 complete -c ort -n "__fish_seen_subcommand_from download" -l archive-all -d 'Archive all the downloaded source code as a single ZIP file to the output directory. Is ignored if \'--project-url\' is also specified.'
 complete -c ort -n "__fish_seen_subcommand_from download" -l package-types -r -fa "PACKAGE PROJECT" -d 'A comma-separated list of the package types from the ORT file\'s analyzer result to limit downloads to.'
 complete -c ort -n "__fish_seen_subcommand_from download" -l package-ids -r -d 'A comma-separated list of regular expressions for matching package ids from the ORT file\'s analyzer result to limit downloads to. If not specified, all packages are downloaded.'
+complete -c ort -n "__fish_seen_subcommand_from download" -l skip-excluded -d 'Do not download excluded projects or packages. Works only with the \'--ort-file\' parameter.'
+complete -c ort -n "__fish_seen_subcommand_from download" -l dry-run -d 'Do not actually download anything but just verify that all source code locations are valid.'
+complete -c ort -n "__fish_seen_subcommand_from download" -l max-parallel-downloads -s p -r -d 'The maximum number of parallel downloads to happen.'
 complete -c ort -n "__fish_seen_subcommand_from download" -s h -l help -d 'Show this message and exit'
 
 
@@ -86,20 +100,30 @@ complete -c ort -f -n __fish_use_subcommand -a evaluate -d 'Evaluate ORT result 
 ## Options for evaluate
 complete -c ort -n "__fish_seen_subcommand_from evaluate" -l ort-file -s i -r -F -d 'The ORT result file to read as input.'
 complete -c ort -n "__fish_seen_subcommand_from evaluate" -l output-dir -s o -r -F -d 'The directory to write the ORT result file with evaluation results to.  If no output directory is specified, no ORT result file is written and only the exit code signals a success or failure.'
-complete -c ort -n "__fish_seen_subcommand_from evaluate" -l output-formats -s f -r -fa "JSON XML YAML" -d 'The list of output formats to be used for the ORT result file(s).'
-complete -c ort -n "__fish_seen_subcommand_from evaluate" -l rules-file -s r -r -F -d 'The name of a script file containing rules. Must not be used together with \'--rules-resource\'.'
-complete -c ort -n "__fish_seen_subcommand_from evaluate" -l rules-resource -r -d 'The name of a script resource on the classpath that contains rules. Must not be used together with \'--rules-file\'.'
+complete -c ort -n "__fish_seen_subcommand_from evaluate" -l output-formats -s f -r -fa "JSON YAML" -d 'The list of output formats to be used for the ORT result file(s).'
+complete -c ort -n "__fish_seen_subcommand_from evaluate" -l rules-file -s r -r -F -d 'The name of a script file containing rules.'
+complete -c ort -n "__fish_seen_subcommand_from evaluate" -l rules-resource -r -d 'The name of a script resource on the classpath that contains rules.'
 complete -c ort -n "__fish_seen_subcommand_from evaluate" -l copyright-garbage-file -r -F -d 'A file containing copyright statements which are marked as garbage.'
+complete -c ort -n "__fish_seen_subcommand_from evaluate" -l license-choices-file -r -F -d 'A file containing license choices.'
 complete -c ort -n "__fish_seen_subcommand_from evaluate" -l license-classifications-file -r -F -d 'A file containing the license classifications which are passed as parameter to the rules script.'
-complete -c ort -n "__fish_seen_subcommand_from evaluate" -l package-configuration-dir -r -F -d 'A directory that is searched recursively for package configuration files. Each file must only contain a single package configuration. Must not be used together with \'--package-configuration-file\'.'
-complete -c ort -n "__fish_seen_subcommand_from evaluate" -l package-configuration-file -r -F -d 'A file containing a list of package configurations. Must not be used together with \'--package-configuration-dir\'.'
-complete -c ort -n "__fish_seen_subcommand_from evaluate" -l package-curations-file -r -F -d 'A file containing package curation data. This replaces all package curations contained in the given ORT result file with the ones present in the given file.'
-complete -c ort -n "__fish_seen_subcommand_from evaluate" -l package-curations-dir -r -F -d 'A directory containing package curation data. This replaces all package curations contained in the given ORT result file with the ones present in the given directory.'
-complete -c ort -n "__fish_seen_subcommand_from evaluate" -l repository-configuration-file -r -F -d 'A file containing the repository configuration. If set, the \'.ort.yml\' overrides the repository configuration contained in the ORT result from the input file.'
+complete -c ort -n "__fish_seen_subcommand_from evaluate" -l package-configurations-dir -r -F -d 'A directory that is searched recursively for package configuration files. Each file must only contain a single package configuration.'
+complete -c ort -n "__fish_seen_subcommand_from evaluate" -l package-curations-file -r -F -d 'A file containing package curations. This replaces all package curations contained in the given ORT result file with the ones present in the given file and, if enabled, those from the repository configuration.'
+complete -c ort -n "__fish_seen_subcommand_from evaluate" -l package-curations-dir -r -F -d 'A directory containing package curation files. This replaces all package curations contained in the given ORT result file with the ones present in the given directory and, if enabled, those from the repository configuration.'
+complete -c ort -n "__fish_seen_subcommand_from evaluate" -l repository-configuration-file -r -F -d 'A file containing the repository configuration. If set, overrides the repository configuration contained in the ORT result input file.'
 complete -c ort -n "__fish_seen_subcommand_from evaluate" -l resolutions-file -r -F -d 'A file containing issue and rule violation resolutions.'
 complete -c ort -n "__fish_seen_subcommand_from evaluate" -l label -s l -r -d 'Set a label in the ORT result, overwriting any existing label of the same name. Can be used multiple times. For example: --label distribution=external'
 complete -c ort -n "__fish_seen_subcommand_from evaluate" -l check-syntax -d 'Do not evaluate the script but only check its syntax. No output is written in this case.'
 complete -c ort -n "__fish_seen_subcommand_from evaluate" -s h -l help -d 'Show this message and exit'
+
+
+### Setup for migrate
+complete -c ort -f -n __fish_use_subcommand -a migrate -d 'Assist with migrating ORT configuration to newer ORT versions.'
+
+## Options for migrate
+complete -c ort -n "__fish_seen_subcommand_from migrate" -l hocon-to-yaml -r -F -d 'Perform a simple conversion of the given HOCON configuration file to YAML and print the result.'
+complete -c ort -n "__fish_seen_subcommand_from migrate" -l nuget-ids -r -F -d 'Convert NuGet package IDs in curations and configurations to the new format that includes a namespace.'
+complete -c ort -n "__fish_seen_subcommand_from migrate" -l pub-ids -r -F -d 'Convert Pub package IDs in curations and configurations to the new format that has no namespace.'
+complete -c ort -n "__fish_seen_subcommand_from migrate" -s h -l help -d 'Show this message and exit'
 
 
 ### Setup for notify
@@ -113,22 +137,31 @@ complete -c ort -n "__fish_seen_subcommand_from notify" -l label -s l -r -d 'Set
 complete -c ort -n "__fish_seen_subcommand_from notify" -s h -l help -d 'Show this message and exit'
 
 
+### Setup for plugins
+complete -c ort -f -n __fish_use_subcommand -a plugins -d 'Print information about the installed ORT plugins.'
+
+## Options for plugins
+complete -c ort -n "__fish_seen_subcommand_from plugins" -l types -r -fa "advice-providers commands license-fact-providers package-configuration-providers package-curation-providers package-managers reporters scanners version-control-systems" -d 'A comma-separated list of plugin types to show.'
+complete -c ort -n "__fish_seen_subcommand_from plugins" -s h -l help -d 'Show this message and exit'
+
+
 ### Setup for report
 complete -c ort -f -n __fish_use_subcommand -a report -d 'Present Analyzer, Scanner and Evaluator results in various formats.'
 
 ## Options for report
 complete -c ort -n "__fish_seen_subcommand_from report" -l ort-file -s i -r -F -d 'The ORT result file to use.'
 complete -c ort -n "__fish_seen_subcommand_from report" -l output-dir -s o -r -F -d 'The output directory to store the generated reports in.'
-complete -c ort -n "__fish_seen_subcommand_from report" -l report-formats -s f -r -d 'The comma-separated reports to generate, any of [AdocTemplate, CtrlXAutomation, CycloneDx, DocBookTemplate, EvaluatedModel, Excel, FossId, GitLabLicenseModel, HtmlTemplate, ManPageTemplate, NoticeTemplate, Opossum, PdfTemplate, SpdxDocument, StaticHtml, WebApp, XHtmlTemplate].'
-complete -c ort -n "__fish_seen_subcommand_from report" -l copyright-garbage-file -r -F -d 'A file containing copyright statements which are marked as garbage.'
-complete -c ort -n "__fish_seen_subcommand_from report" -l custom-license-texts-dir -r -F -d 'A directory which maps custom license IDs to license texts. It should contain one text file per license with the license ID as the filename. A custom license text is used only if its ID has a \'LicenseRef-\' prefix and if the respective license text is not known by ORT.'
+complete -c ort -n "__fish_seen_subcommand_from report" -l report-formats -s f -r -d 'A comma-separated list of report formats to generate, any of [AOSD2.1, CtrlXAutomation, CycloneDX, DocBookTemplate, EvaluatedModel, FossID, FossIdSnippet, HtmlTemplate, ManPageTemplate, Opossum, PdfTemplate, PlainTextTemplate, SpdxDocument, StaticHTML, TrustSource, WebApp].'
+complete -c ort -n "__fish_seen_subcommand_from report" -l copyright-garbage-file -r -F -d 'A file containing copyright statements which are marked as garbage. This can make the output inconsistent with the evaluator output but is useful when testing copyright garbage.'
+complete -c ort -n "__fish_seen_subcommand_from report" -l custom-license-texts-dir -r -F -d 'A directory which contains custom license texts. It must contain one text file per license with the license ID as the filename. The license texts from this directory will take priority over the license texts provided by the license fact providers configured in the config.yml.'
 complete -c ort -n "__fish_seen_subcommand_from report" -l how-to-fix-text-provider-script -r -F -d 'The path to a Kotlin script which returns an instance of a \'HowToFixTextProvider\'. That provider injects how-to-fix texts in Markdown format for ORT issues.'
-complete -c ort -n "__fish_seen_subcommand_from report" -l license-classifications-file -r -F -d 'A file containing the license classifications.'
-complete -c ort -n "__fish_seen_subcommand_from report" -l package-configuration-dir -r -F -d 'A directory that is searched recursively for package configuration files. Each file must only contain a single package configuration. Must not be used together with \'--package-configuration-file\'.'
-complete -c ort -n "__fish_seen_subcommand_from report" -l package-configuration-file -r -F -d 'A file containing a list of package configurations. Must not be used together with \'--package-configuration-dir\'.'
-complete -c ort -n "__fish_seen_subcommand_from report" -l repository-configuration-file -r -F -d 'A file containing the repository configuration. If set, the \'.ort.yml\' overrides the repository configuration contained in the ORT result from the input file.'
+complete -c ort -n "__fish_seen_subcommand_from report" -l license-choices-file -r -F -d 'A file containing license choices.'
+complete -c ort -n "__fish_seen_subcommand_from report" -l license-classifications-file -r -F -d 'A file containing the license classifications. This can make the output inconsistent with the evaluator output but is useful when testing license classifications.'
+complete -c ort -n "__fish_seen_subcommand_from report" -l package-configurations-dir -r -F -d 'A directory that is searched recursively for package configuration files. Each file must only contain a single package configuration. This can make the output inconsistent with the evaluator output but is useful when testing package configurations.'
+complete -c ort -n "__fish_seen_subcommand_from report" -l refresh-resolutions -d 'Use the resolutions from the global and repository configuration instead of the resolved configuration. This can make the output inconsistent with the evaluator output but is useful when testing resolutions.'
+complete -c ort -n "__fish_seen_subcommand_from report" -l repository-configuration-file -r -F -d 'A file containing the repository configuration. If set, overrides the repository configuration contained in the ORT result input file. This can make the output inconsistent with the output of previous commands but is useful when testing changes in the repository configuration.'
 complete -c ort -n "__fish_seen_subcommand_from report" -l resolutions-file -r -F -d 'A file containing issue and rule violation resolutions.'
-complete -c ort -n "__fish_seen_subcommand_from report" -l report-option -s O -r -d 'Specify a report-format-specific option. The key is the (case-insensitive) name of the report format, and the value is an arbitrary key-value pair. For example: -O NoticeTemplate=template.id=summary'
+complete -c ort -n "__fish_seen_subcommand_from report" -l report-option -s O -r -d 'Specify a report-format-specific option. The key is the (case-insensitive) name of the report format, and the value is an arbitrary key-value pair. For example: -O PlainTextTemplate=template.id=NOTICE_SUMMARY'
 complete -c ort -n "__fish_seen_subcommand_from report" -s h -l help -d 'Show this message and exit'
 
 
@@ -143,15 +176,12 @@ complete -c ort -n "__fish_seen_subcommand_from requirements" -s h -l help -d 'S
 complete -c ort -f -n __fish_use_subcommand -a scan -d 'Run external license / copyright scanners.'
 
 ## Options for scan
-complete -c ort -n "__fish_seen_subcommand_from scan" -l ort-file -s i -r -F -d 'An ORT result file with an analyzer result to use. Source code is downloaded automatically if needed. Must not be used together with \'--input-path\'.'
-complete -c ort -n "__fish_seen_subcommand_from scan" -l input-path -s p -r -F -d 'An input directory or file to scan. Must not be used together with \'--ort-file\'.'
+complete -c ort -n "__fish_seen_subcommand_from scan" -l ort-file -s i -r -F -d 'An ORT result file with an analyzer result to use. Source code is downloaded automatically if needed.'
 complete -c ort -n "__fish_seen_subcommand_from scan" -l output-dir -s o -r -F -d 'The directory to write the ORT result file with scan results to.'
-complete -c ort -n "__fish_seen_subcommand_from scan" -l output-formats -s f -r -fa "JSON XML YAML" -d 'The list of output formats to be used for the ORT result file(s).'
+complete -c ort -n "__fish_seen_subcommand_from scan" -l output-formats -s f -r -fa "JSON YAML" -d 'The list of output formats to be used for the ORT result file(s).'
 complete -c ort -n "__fish_seen_subcommand_from scan" -l label -s l -r -d 'Set a label in the ORT result, overwriting any existing label of the same name. Can be used multiple times. For example: --label distribution=external'
-complete -c ort -n "__fish_seen_subcommand_from scan" -l scanner -s s -r -d 'The scanner to use.'
-complete -c ort -n "__fish_seen_subcommand_from scan" -l experimental-scanners -r -d 'A comma-separated list of experimental scanners to use. This option is mutually exclusive with \'--scanner\'. The experimental scanner implementation scans by provenance instead of by package. This improves reuse of stored scan results and increases performance if multiple packages are coming from the same source code repository. The experimental scanner is work in progress and it is therefore not recommended to use it in production.'
-complete -c ort -n "__fish_seen_subcommand_from scan" -l project-scanner -r -d 'The scanner to use for scanning the source code of projects. By default, projects and packages are scanned with the same scanner as specified by \'--scanner\'.'
-complete -c ort -n "__fish_seen_subcommand_from scan" -l experimental-project-scanners -r -d 'A comma-separated list of experimental scanners to use for scanning the source code of projects. By default, projects and packages are scanned with the same scanner as specified by \'--experimental-scanner\'.'
+complete -c ort -n "__fish_seen_subcommand_from scan" -l scanners -s s -r -d 'A comma-separated list of scanners to use.'
+complete -c ort -n "__fish_seen_subcommand_from scan" -l project-scanners -r -d 'A comma-separated list of scanners to use for scanning the source code of projects. By default, projects and packages are scanned with the same scanners as specified by \'--scanners\'.'
 complete -c ort -n "__fish_seen_subcommand_from scan" -l package-types -r -fa "PACKAGE PROJECT" -d 'A comma-separated list of the package types from the ORT file\'s analyzer result to limit scans to.'
 complete -c ort -n "__fish_seen_subcommand_from scan" -l skip-excluded -d 'Do not scan excluded projects or packages. Works only with the \'--ort-file\' parameter.'
 complete -c ort -n "__fish_seen_subcommand_from scan" -l resolutions-file -r -F -d 'A file containing issue and rule violation resolutions.'
@@ -163,7 +193,7 @@ complete -c ort -f -n __fish_use_subcommand -a upload-curations -d 'Upload ORT p
 
 ## Options for upload-curations
 complete -c ort -n "__fish_seen_subcommand_from upload-curations" -l input-file -s i -r -F -d 'The file with package curations to upload.'
-complete -c ort -n "__fish_seen_subcommand_from upload-curations" -l server -s s -r -fa "PRODUCTION DEVELOPMENT LOCAL" -d 'The ClearlyDefined server to upload to.'
+complete -c ort -n "__fish_seen_subcommand_from upload-curations" -l server -s s -r -fa "PRODUCTION DEVELOPMENT LOCAL" -d 'The ClearlyDefined server to upload to. Must be one of [PRODUCTION, DEVELOPMENT, LOCAL].'
 complete -c ort -n "__fish_seen_subcommand_from upload-curations" -s h -l help -d 'Show this message and exit'
 
 
@@ -176,13 +206,4 @@ complete -c ort -n "__fish_seen_subcommand_from upload-result-to-postgres" -l ta
 complete -c ort -n "__fish_seen_subcommand_from upload-result-to-postgres" -l column-name -r -d 'The name of the JSONB column to store the ORT result.'
 complete -c ort -n "__fish_seen_subcommand_from upload-result-to-postgres" -l create-table -d 'Create the table if it does not exist.'
 complete -c ort -n "__fish_seen_subcommand_from upload-result-to-postgres" -s h -l help -d 'Show this message and exit'
-
-
-### Setup for upload-result-to-sw360
-complete -c ort -f -n __fish_use_subcommand -a upload-result-to-sw360 -d 'Upload an ORT result to SW360.'
-
-## Options for upload-result-to-sw360
-complete -c ort -n "__fish_seen_subcommand_from upload-result-to-sw360" -l ort-file -s i -r -F -d 'The ORT result file to read as input.'
-complete -c ort -n "__fish_seen_subcommand_from upload-result-to-sw360" -l attach-sources -s a -d 'Download sources of packages and upload them as attachments to SW360 releases.'
-complete -c ort -n "__fish_seen_subcommand_from upload-result-to-sw360" -s h -l help -d 'Show this message and exit'
 

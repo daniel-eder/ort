@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,72 +17,40 @@
  * License-Filename: LICENSE
  */
 
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
-
-val askalonoVersion: String by project
-val boyterLcVersion: String by project
-val licenseeVersion: String by project
-val scancodeVersion: String by project
-
 plugins {
     // Apply core plugins.
-    `java-library`
-}
+    `java-test-fixtures`
 
-repositories {
-    exclusiveContent {
-        forRepository {
-            maven("https://repo.eclipse.org/content/repositories/sw360-releases/")
-        }
-
-        filter {
-            includeGroup("org.eclipse.sw360")
-        }
-    }
+    // Apply precompiled plugins.
+    id("ort-library-conventions")
 }
 
 dependencies {
-    api(project(":model"))
+    api(projects.downloader)
+    api(projects.model)
+    api(projects.plugins.api)
+    api(projects.utils.ortUtils)
+    api(libs.exposed.core)
+    api(libs.exposed.dao)
 
-    implementation(project(":clients:clearly-defined"))
-    implementation(project(":clients:fossid-webapp"))
-    implementation(project(":clients:scanoss"))
-    implementation(project(":downloader"))
-    implementation(project(":utils:ort-utils"))
+    implementation(projects.clients.clearlyDefinedClient)
+    implementation(projects.utils.commonUtils)
+    implementation(jacksonLibs.jacksonModuleKotlin)
+    implementation(libs.exposed.jdbc)
+    implementation(libs.exposed.json)
+    implementation(libs.kotlinx.coroutines)
 
-    implementation(libs.bundles.exposed)
-    implementation(libs.hikari)
-    implementation(libs.jacksonModuleKotlin)
-    implementation(libs.kotlinxCoroutines)
-    implementation(libs.postgres)
-    implementation(libs.retrofitConverterJackson)
-    implementation(libs.scanoss)
-    implementation(libs.sw360Client)
+    funTestImplementation(platform(projects.plugins.scanners))
+    funTestImplementation(platform(projects.plugins.versionControlSystems))
+    funTestImplementation(testFixtures(projects.scanner))
+    funTestImplementation(projects.utils.testUtils)
 
-    testImplementation(libs.kotlinxSerialization)
+    testFixturesImplementation(projects.utils.commonUtils)
+    testFixturesImplementation(projects.utils.testUtils)
+    testFixturesImplementation(libs.kotest.assertions.core)
+    testFixturesImplementation(libs.kotest.runner.junit5)
+
+    testImplementation(platform(projects.plugins.scanners))
     testImplementation(libs.mockk)
-    testImplementation(libs.retrofitConverterKotlinxSerialization)
     testImplementation(libs.wiremock)
-}
-
-buildConfig {
-    packageName("org.ossreviewtoolkit.scanner")
-
-    buildConfigField("String", "ASKALONO_VERSION", "\"$askalonoVersion\"")
-    buildConfigField("String", "BOYTER_LC_VERSION", "\"$boyterLcVersion\"")
-    buildConfigField("String", "LICENSEE_VERSION", "\"$licenseeVersion\"")
-    buildConfigField("String", "SCANCODE_VERSION", "\"$scancodeVersion\"")
-    buildConfigField("String", "SCANOSS_VERSION", "\"${libs.versions.scanoss.get()}\"")
-}
-
-tasks.withType<KotlinCompile>().configureEach {
-    val customCompilerArgs = listOf(
-        "-opt-in=kotlinx.serialization.ExperimentalSerializationApi"
-    )
-
-    if ("test" in name.toLowerCase()) {
-        kotlinOptions {
-            freeCompilerArgs = freeCompilerArgs + customCompilerArgs
-        }
-    }
 }

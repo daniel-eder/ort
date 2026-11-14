@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,7 +26,9 @@ import java.io.ByteArrayInputStream
 import java.io.FileNotFoundException
 import java.io.IOException
 
-import org.apache.logging.log4j.kotlin.Logging
+import kotlin.coroutines.cancellation.CancellationException
+
+import org.apache.logging.log4j.kotlin.logger
 
 import org.ossreviewtoolkit.model.Identifier
 import org.ossreviewtoolkit.model.RemoteArtifact
@@ -37,18 +39,18 @@ import org.ossreviewtoolkit.utils.ort.showStackTrace
 import org.ossreviewtoolkit.utils.ort.storage.FileStorage
 
 class FileBasedPackageProvenanceStorage(val backend: FileStorage) : PackageProvenanceStorage {
-    companion object : Logging
+    override suspend fun readProvenance(
+        id: Identifier,
+        sourceArtifact: RemoteArtifact
+    ): PackageProvenanceResolutionResult? = readResults(id).find { it.sourceArtifact == sourceArtifact }?.result
 
-    override fun readProvenance(id: Identifier, sourceArtifact: RemoteArtifact): PackageProvenanceResolutionResult? =
-        readResults(id).find { it.sourceArtifact == sourceArtifact }?.result
-
-    override fun readProvenance(id: Identifier, vcs: VcsInfo): PackageProvenanceResolutionResult? =
+    override suspend fun readProvenance(id: Identifier, vcs: VcsInfo): PackageProvenanceResolutionResult? =
         readResults(id).find { it.vcs == vcs }?.result
 
-    override fun readProvenances(id: Identifier): List<PackageProvenanceResolutionResult> =
+    override suspend fun readProvenances(id: Identifier): List<PackageProvenanceResolutionResult> =
         readResults(id).map { it.result }
 
-    private fun readResults(id: Identifier): List<StorageEntry> {
+    private suspend fun readResults(id: Identifier): List<StorageEntry> {
         val path = storagePath(id)
 
         return runCatching {
@@ -57,14 +59,17 @@ class FileBasedPackageProvenanceStorage(val backend: FileStorage) : PackageProve
             }
         }.getOrElse {
             when (it) {
+                is CancellationException -> throw it
+
                 is FileNotFoundException -> {
                     // If the file cannot be found it means no scan results have been stored yet.
                     emptyList()
                 }
+
                 else -> {
                     logger.info {
                         "Could not read resolved provenances for '${id.toCoordinates()}' from path '$path': " +
-                                it.collectMessages()
+                            it.collectMessages()
                     }
 
                     emptyList()
@@ -73,16 +78,16 @@ class FileBasedPackageProvenanceStorage(val backend: FileStorage) : PackageProve
         }
     }
 
-    override fun putProvenance(
+    override suspend fun writeProvenance(
         id: Identifier,
         sourceArtifact: RemoteArtifact,
         result: PackageProvenanceResolutionResult
-    ) = putProvenance(id, sourceArtifact, null, result)
+    ) = writeProvenance(id, sourceArtifact, null, result)
 
-    override fun putProvenance(id: Identifier, vcs: VcsInfo, result: PackageProvenanceResolutionResult) =
-        putProvenance(id, null, vcs, result)
+    override suspend fun writeProvenance(id: Identifier, vcs: VcsInfo, result: PackageProvenanceResolutionResult) =
+        writeProvenance(id, null, vcs, result)
 
-    private fun putProvenance(
+    private suspend fun writeProvenance(
         id: Identifier,
         sourceArtifact: RemoteArtifact?,
         vcs: VcsInfo?,
@@ -102,16 +107,26 @@ class FileBasedPackageProvenanceStorage(val backend: FileStorage) : PackageProve
             logger.debug { "Stored resolved provenances for '${id.toCoordinates()}' at path '$path'." }
         }.onFailure {
             when (it) {
+                is CancellationException -> throw it
+
                 is IllegalArgumentException, is IOException -> {
                     it.showStackTrace()
 
                     logger.warn {
                         "Could not store resolved provenances for '${id.toCoordinates()}' at path '$path': " +
-                                it.collectMessages()
+                            it.collectMessages()
                     }
                 }
+
                 else -> throw it
             }
+        }
+    }
+
+    override suspend fun deleteProvenances(id: Identifier) {
+        val path = storagePath(id)
+        if (!backend.delete(path)) {
+            logger.warn { "Could not delete resolved provenances for '${id.toCoordinates()}' at path '$path'." }
         }
     }
 }

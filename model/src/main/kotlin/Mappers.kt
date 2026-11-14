@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,33 +19,69 @@
 
 package org.ossreviewtoolkit.model
 
-import com.fasterxml.jackson.databind.JsonNode
-import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.databind.PropertyNamingStrategies
+import com.fasterxml.jackson.databind.PropertyNamingStrategies.SNAKE_CASE
 import com.fasterxml.jackson.databind.SerializationFeature
+import com.fasterxml.jackson.databind.cfg.MapperBuilder
 import com.fasterxml.jackson.databind.json.JsonMapper
-import com.fasterxml.jackson.databind.node.MissingNode
-import com.fasterxml.jackson.dataformat.xml.XmlMapper
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
+import com.fasterxml.jackson.dataformat.yaml.YAMLGenerator
 import com.fasterxml.jackson.dataformat.yaml.YAMLMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
-import com.fasterxml.jackson.module.kotlin.registerKotlinModule
+import com.fasterxml.jackson.module.kotlin.kotlinModule
+import com.fasterxml.jackson.module.kotlin.readValue
 
-val PROPERTY_NAMING_STRATEGY = PropertyNamingStrategies.SNAKE_CASE as PropertyNamingStrategies.NamingBase
+import org.yaml.snakeyaml.LoaderOptions
 
-/**
- * A lambda expression that can be [applied][apply] to all [ObjectMapper]s to configure them the same way.
- */
-val mapperConfig: ObjectMapper.() -> Unit = {
-    registerKotlinModule()
+/** A lambda expression that can be [applied][apply] to all [MapperBuilder]s to build them the same way. */
+val mapperConfig: MapperBuilder<*, *>.() -> Unit = {
+    addModule(kotlinModule())
 
-    registerModule(JavaTimeModule())
+    addModule(JavaTimeModule())
     disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
 
-    propertyNamingStrategy = PROPERTY_NAMING_STRATEGY
+    propertyNamingStrategy(SNAKE_CASE)
 }
 
-val jsonMapper = JsonMapper().apply(mapperConfig)
-val xmlMapper = XmlMapper().apply(mapperConfig)
-val yamlMapper = YAMLMapper().apply(mapperConfig)
+val jsonMapper: JsonMapper by lazy {
+    JsonMapper.builder()
+        .apply(mapperConfig)
+        .build()
+}
 
-val EMPTY_JSON_NODE: JsonNode = MissingNode.getInstance()
+val yamlMapper: YAMLMapper by lazy {
+    val loaderOptions = LoaderOptions().apply {
+        // Set the code point limit to the maximum possible value which is approximately 2GB, required since
+        // SnakeYAML 1.32. Also see:
+        //
+        // https://github.com/FasterXML/jackson-dataformats-text/tree/2.15/yaml#maximum-input-yaml-document-size-3-mb
+        // https://github.com/FasterXML/jackson-dataformats-text/issues/337
+        //
+        // TODO: Consider making this configurable.
+        codePointLimit = Int.MAX_VALUE
+    }
+
+    val yamlFactory = YAMLFactory.builder()
+        .loaderOptions(loaderOptions)
+        .build()
+
+    YAMLMapper.builder(yamlFactory)
+        .apply(mapperConfig)
+        .enable(YAMLGenerator.Feature.ALLOW_LONG_KEYS)
+        .build()
+}
+
+inline fun <reified T> String.fromYaml(): T = yamlMapper.readValue(this)
+
+fun Any?.toYaml(): String = yamlMapper.writeValueAsString(this)
+
+inline fun <reified T> String.fromJson(): T = jsonMapper.readValue(this)
+
+fun Any?.toJson(prettyPrint: Boolean = true): String {
+    val writer = if (prettyPrint) {
+        jsonMapper.writerWithDefaultPrettyPrinter()
+    } else {
+        jsonMapper.writer()
+    }
+
+    return writer.writeValueAsString(this)
+}

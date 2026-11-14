@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2020 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@
 package org.ossreviewtoolkit.model.config
 
 import io.kotest.core.spec.style.WordSpec
+import io.kotest.engine.spec.tempfile
 import io.kotest.inspectors.forAll
 import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.nulls.beNull
@@ -30,13 +31,13 @@ import java.io.File
 
 import org.ossreviewtoolkit.model.readValue
 import org.ossreviewtoolkit.model.writeValue
-import org.ossreviewtoolkit.utils.test.createTestTempFile
+import org.ossreviewtoolkit.utils.ort.ORT_REFERENCE_CONFIG_FILENAME
 
 class ScannerConfigurationTest : WordSpec({
     "ScannerConfiguration" should {
         "support a serialization round-trip via an ObjectMapper" {
-            val ortConfig = OrtConfiguration.load(file = File("src/main/resources/$REFERENCE_CONFIG_FILENAME"))
-            val rereadOrtConfig = createTestTempFile(suffix = ".yml").run {
+            val ortConfig = OrtConfiguration.load(file = File("src/main/resources/$ORT_REFERENCE_CONFIG_FILENAME"))
+            val rereadOrtConfig = tempfile(null, ".yml").run {
                 writeValue(ortConfig)
                 readValue<OrtConfiguration>()
             }
@@ -51,6 +52,7 @@ class ScannerConfigurationTest : WordSpec({
             actualScannerConfig.storageReaders shouldBe expectedScannerConfig.storageReaders
             actualScannerConfig.storageWriters shouldBe expectedScannerConfig.storageWriters
             actualScannerConfig.archive?.fileStorage?.httpFileStorage should beNull()
+            actualScannerConfig.archive?.fileStorage?.s3FileStorage should beNull()
 
             actualStorages.keys shouldContainExactly expectedStorages.keys
             actualStorages.entries.forAll { (storageKey, storage) ->

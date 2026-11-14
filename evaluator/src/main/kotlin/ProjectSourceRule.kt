@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2022 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,26 +22,24 @@ package org.ossreviewtoolkit.evaluator
 import java.io.File
 
 import org.ossreviewtoolkit.model.LicenseSource
-import org.ossreviewtoolkit.model.OrtResult
 import org.ossreviewtoolkit.model.RepositoryProvenance
 import org.ossreviewtoolkit.model.VcsType
 import org.ossreviewtoolkit.model.utils.getRepositoryPath
 import org.ossreviewtoolkit.utils.common.FileMatcher
 
-/**
- * An [OrtResultRule] which allows downloading the project's source code if needed.
- */
+/** An [OrtResultRule] which allows downloading the project's source code if needed. */
 open class ProjectSourceRule(
     ruleSet: RuleSet,
-    name: String,
-    projectSourceResolver: SourceTreeResolver = ruleSet.ortResult.createResolver()
+    name: String
 ) : OrtResultRule(ruleSet, name) {
+    override val description = "Evaluating project source rule '$name'."
+
     /**
      * The directory containing the source code of the project. Accessing the property for the first time triggers a
      * clone and may take a while.
      */
     @Suppress("MemberVisibilityCanBePrivate") // This property is used in rules.
-    val projectSourcesDir: File by lazy { projectSourceResolver.rootDir }
+    val projectSourcesDir: File by lazy { ruleSet.projectSourceResolver.rootDir }
 
     private val detectedLicensesForFilePath: Map<String, Set<String>> by lazy {
         val result = mutableMapOf<String, MutableSet<String>>()
@@ -71,30 +69,24 @@ open class ProjectSourceRule(
      */
     fun projectSourceFindDirectories(vararg patterns: String): List<File> =
         projectSourcesDir.walkBottomUp().filterTo(mutableListOf()) {
-            it.isDirectory && FileMatcher.match(patterns.toList(), it.relativeTo(projectSourcesDir).path)
+            val path = it.relativeTo(projectSourcesDir).invariantSeparatorsPath
+            it.isDirectory && FileMatcher.matches(patterns.asList(), path)
         }
 
-    /**
-     * Return all files from the project's source tree which match any of the provided [glob expressions][patterns].
-     */
+    /** Return all files from the project's source tree which match any of the provided [glob expressions][patterns]. */
     fun projectSourceFindFiles(vararg patterns: String): List<File> =
         projectSourcesDir.walkBottomUp().filterTo(mutableListOf()) {
-            it.isFile && FileMatcher.match(patterns.toList(), it.relativeTo(projectSourcesDir).path)
+            val path = it.relativeTo(projectSourcesDir).invariantSeparatorsPath
+            it.isFile && FileMatcher.matches(patterns.asList(), path)
         }
 
-    /**
-     * Return the detected licenses for any file matching the given [glob expressions][patterns].
-     */
-    fun projectSourceGetDetectedLicensesByFilePath(
-        vararg patterns: String
-    ): Map<String, Set<String>> =
+    /** Return the detected licenses for any file matching the given [glob expressions][patterns]. */
+    fun projectSourceGetDetectedLicensesByFilePath(vararg patterns: String): Map<String, Set<String>> =
         detectedLicensesForFilePath.filter { (filePath, _) ->
-            FileMatcher.match(patterns.toList(), filePath)
+            FileMatcher.matches(patterns.asList(), filePath)
         }
 
-    /**
-     * Return the [VcsType] of the project's code repository.
-     */
+    /** Return the [VcsType] of the project's code repository. */
     fun projectSourceGetVcsType(): VcsType = ortResult.repository.vcsProcessed.type
 
     /**
@@ -129,6 +121,7 @@ open class ProjectSourceRule(
     fun projectSourceHasFile(vararg patterns: String): RuleMatcher =
         object : RuleMatcher {
             override val description = "projectSourceHasFile('${patterns.joinToString()}')"
+
             override fun matches(): Boolean = projectSourceFindFiles(*patterns).isNotEmpty()
         }
 
@@ -141,8 +134,7 @@ open class ProjectSourceRule(
             override val description =
                 "projectSourceHasFileWithContents('$contentPattern', '${patterns.joinToString()}')"
 
-            override fun matches(): Boolean =
-                projectSourceFindFilesWithContent(contentPattern, *patterns).isNotEmpty()
+            override fun matches(): Boolean = projectSourceFindFilesWithContent(contentPattern, *patterns).isNotEmpty()
         }
 
     /**
@@ -156,10 +148,6 @@ open class ProjectSourceRule(
             override val description =
                 "projectSourceHasVcsType('${vcsTypes.joinToString()}')"
 
-            override fun matches(): Boolean =
-                projectSourceGetVcsType() in types
+            override fun matches(): Boolean = projectSourceGetVcsType() in types
         }
 }
-
-private fun OrtResult.createResolver() =
-    SourceTreeResolver.forRemoteRepository(repository.vcsProcessed)

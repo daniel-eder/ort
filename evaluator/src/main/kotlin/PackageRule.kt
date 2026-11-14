@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,8 @@
 
 package org.ossreviewtoolkit.evaluator
 
+import java.util.EnumSet
+
 import org.ossreviewtoolkit.model.CuratedPackage
 import org.ossreviewtoolkit.model.Identifier
 import org.ossreviewtoolkit.model.LicenseSource
@@ -29,30 +31,35 @@ import org.ossreviewtoolkit.model.config.Excludes
 import org.ossreviewtoolkit.model.licenses.LicenseView
 import org.ossreviewtoolkit.model.licenses.ResolvedLicense
 import org.ossreviewtoolkit.model.licenses.ResolvedLicenseInfo
-import org.ossreviewtoolkit.utils.spdx.SpdxExpression
-import org.ossreviewtoolkit.utils.spdx.SpdxLicenseReferenceExpression
+import org.ossreviewtoolkit.model.vulnerabilities.Cvss2Rating
+import org.ossreviewtoolkit.model.vulnerabilities.Cvss3Rating
+import org.ossreviewtoolkit.model.vulnerabilities.Cvss4Rating
+import org.ossreviewtoolkit.model.vulnerabilities.Vulnerability
+import org.ossreviewtoolkit.model.vulnerabilities.VulnerabilityReference
+import org.ossreviewtoolkit.utils.common.enumSetOf
+import org.ossreviewtoolkit.utils.spdx.SpdxConstants
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxExpression
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxLicenseReferenceExpression
 
-/**
- * A [Rule] to check a single [Package].
- */
+/** A [Rule] to check a single [Package]. */
 open class PackageRule(
     ruleSet: RuleSet,
     name: String,
 
-    /**
-     * The [CuratedPackage] to check.
-     */
+    /** The [CuratedPackage] to check. */
     val pkg: CuratedPackage,
 
-    /**
-     * The resolved license info for the [Package].
-     */
+    /** The resolved license info for the [Package]. */
     val resolvedLicenseInfo: ResolvedLicenseInfo
 ) : Rule(ruleSet, name) {
     private val licenseRules = mutableListOf<LicenseRule>()
+    private val effectiveLicenseForLicenseView = mutableMapOf<LicenseView, SpdxExpression?>()
 
-    @Suppress("UNUSED") // This is intended to be used by rule implementations.
-    val uncuratedPkg by lazy { pkg.toUncuratedPackage() }
+    @Suppress("unused") // This is intended to be used by rule implementations.
+    val uncuratedPkg: Package by lazy {
+        @Suppress("UnsafeCallOnNullableType")
+        ruleSet.ortResult.getUncuratedPackageOrProject(pkg.metadata.id)!!
+    }
 
     override val description = "Evaluating rule '$name' for package '${pkg.metadata.id.toCoordinates()}'."
 
@@ -62,42 +69,77 @@ open class PackageRule(
         licenseRules.forEach { it.evaluate() }
     }
 
-    /**
-     * A [RuleMatcher] that checks whether any vulnerability was found for the [package][pkg].
-     */
+    /** Return the effective license of [pkg] for the given [licenseView]. */
+    fun getEffectiveLicense(licenseView: LicenseView): SpdxExpression? =
+        effectiveLicenseForLicenseView.getOrPut(licenseView) {
+            resolvedLicenseInfo.filterExcluded().effectiveLicense(
+                licenseView,
+                ruleSet.ortResult.getPackageLicenseChoices(pkg.metadata.id),
+                ruleSet.ortResult.getRepositoryLicenseChoices()
+            )?.sorted()
+        }
+
+    /** A [RuleMatcher] that checks whether any vulnerability was found for the [package][pkg]. */
     fun hasVulnerability(): RuleMatcher {
         return object : RuleMatcher {
             override val description = "hasVulnerability()"
 
             override fun matches(): Boolean {
                 val run = ruleSet.ortResult.advisor ?: return false
-                return run.results.getVulnerabilities(pkg.metadata.id).isNotEmpty()
+                return run.getVulnerabilities(pkg.metadata.id).isNotEmpty()
             }
         }
     }
 
     /**
-     * A [RuleMatcher] that checks whether any vulnerability for the [package][pkg] has a score that equals or is
-     * greater than [threshold] according to the [scoringSystem] and the belonging [severityComparator].
+     * A [RuleMatcher] that checks whether any vulnerability for the [package][pkg] has a
+     * [reference][Vulnerability.references] with a [score][VulnerabilityReference.score] that equals or is
+     * greater than [scoreThreshold] according to the [scoringSystem]. If the reference provides no score but a
+     * [severity][VulnerabilityReference.severity], the threshold is mapped to a qualitative rating for comparison.
      */
-    fun hasVulnerability(threshold: String, scoringSystem: String, severityComparator: (String, String) -> Boolean) =
+    fun hasVulnerability(scoreThreshold: Float, scoringSystem: String) =
         object : RuleMatcher {
-            override val description = "hasVulnerability($threshold, $scoringSystem)"
+            override val description = "hasVulnerability($scoreThreshold, $scoringSystem)"
 
             override fun matches(): Boolean {
                 val run = ruleSet.ortResult.advisor ?: return false
-                return run.results.getVulnerabilities(pkg.metadata.id)
-                    .filter { vulnerability -> !ruleSet.resolutionProvider.isResolved(vulnerability) }
+                val matchingSystems = run.getVulnerabilities(pkg.metadata.id).asSequence()
+                    .filter { !ruleSet.resolutionProvider.isResolved(it) }
                     .flatMap { it.references }
-                    .filter { reference -> reference.scoringSystem == scoringSystem }
-                    .mapNotNull { reference -> reference.severity }
-                    .any { severityComparator(it, threshold) }
+                    .filter { it.scoringSystem == scoringSystem }
+
+                val scores = matchingSystems.mapNotNull {
+                    it.score ?: scoreFromSeverity(it)
+                }
+
+                return scores.any { it >= scoreThreshold }
             }
+
+            /**
+             * Map the qualitative severity of the given [reference] to a numeric score according to the ratings
+             * defined for the scoring systems. Return *null* if no severity is defined or the scoring system is not
+             * supported.
+             */
+            private fun scoreFromSeverity(reference: VulnerabilityReference): Float? =
+                reference.scoringSystem?.let { system ->
+                    reference.severity?.let { severity ->
+                        when {
+                            Cvss2Rating.PREFIXES.any { system.startsWith(it) } ->
+                                enumValueOf<Cvss2Rating>(severity).upperBound
+
+                            Cvss3Rating.PREFIXES.any { system.startsWith(it) } ->
+                                enumValueOf<Cvss3Rating>(severity).upperBound
+
+                            Cvss4Rating.PREFIXES.any { system.startsWith(it) } ->
+                                enumValueOf<Cvss4Rating>(severity).upperBound
+
+                            else -> null
+                        }
+                    }
+                }
         }
 
-    /**
-     * A [RuleMatcher] that checks if the [package][pkg] has any concluded, declared, or detected license.
-     */
+    /** A [RuleMatcher] that checks if the [package][pkg] has any concluded, declared, or detected license. */
     fun hasLicense() =
         object : RuleMatcher {
             override val description = "hasLicense()"
@@ -105,9 +147,18 @@ open class PackageRule(
             override fun matches() = resolvedLicenseInfo.licenses.any { it.license.isPresent() }
         }
 
-    /**
-     * A [RuleMatcher] that checks if the [package][pkg] is [excluded][Excludes].
-     */
+    /** A [RuleMatcher] that checks if the [package][pkg] has any concluded license. */
+    fun hasConcludedLicense() =
+        object : RuleMatcher {
+            override val description = "hasConcludedLicense()"
+
+            override fun matches(): Boolean {
+                val concludedLicense = resolvedLicenseInfo.licenseInfo.concludedLicenseInfo.concludedLicense
+                return concludedLicense != null && concludedLicense.toString() != SpdxConstants.NOASSERTION
+            }
+        }
+
+    /** A [RuleMatcher] that checks if the [package][pkg] is [excluded][Excludes]. */
     fun isExcluded() =
         object : RuleMatcher {
             override val description = "isExcluded()"
@@ -126,9 +177,7 @@ open class PackageRule(
             override fun matches() = pkg.metadata.id.isFromOrg(*names)
         }
 
-    /**
-     * A [RuleMatcher] that checks whether the [package][pkg] is metadata only.
-     */
+    /** A [RuleMatcher] that checks whether the [package][pkg] is metadata only. */
     fun isMetadataOnly() =
         object : RuleMatcher {
             override val description = "isMetadataOnly()"
@@ -136,9 +185,7 @@ open class PackageRule(
             override fun matches() = pkg.metadata.isMetadataOnly
         }
 
-    /**
-     * A [RuleMatcher] that checks if the [package][pkg] was created from a [Project].
-     */
+    /** A [RuleMatcher] that checks if the [package][pkg] was created from a [Project]. */
     fun isProject() =
         object : RuleMatcher {
             override val description = "isProject()"
@@ -146,9 +193,7 @@ open class PackageRule(
             override fun matches() = ruleSet.ortResult.isProject(pkg.metadata.id)
         }
 
-    /**
-     * A [RuleMatcher] that checks if the [identifier type][Identifier.type] of the [package][pkg] equals [type].
-     */
+    /** A [RuleMatcher] that checks if the [identifier type][Identifier.type] of the [package][pkg] equals [type]. */
     fun isType(type: String) =
         object : RuleMatcher {
             override val description = "isType($type)"
@@ -156,56 +201,74 @@ open class PackageRule(
             override fun matches() = pkg.metadata.id.type == type
         }
 
-    /**
-     * A DSL function to configure a [LicenseRule] and add it to this rule.
-     */
-    fun licenseRule(name: String, licenseView: LicenseView, block: LicenseRule.() -> Unit) {
-        resolvedLicenseInfo.filter(licenseView, filterSources = true)
-            .applyChoices(ruleSet.ortResult.getPackageLicenseChoices(pkg.metadata.id), licenseView)
-            .applyChoices(ruleSet.ortResult.getRepositoryLicenseChoices(), licenseView).forEach { resolvedLicense ->
+    /** A DSL function to configure a [LicenseRule] and add it to this rule. */
+    fun licenseRule(
+        name: String,
+        licenseView: LicenseView,
+        filterExcluded: Boolean = true,
+        separateEvaluationPerSource: Boolean = true,
+        block: LicenseRule.() -> Unit
+    ) {
+        val effectiveResolvedLicenseInfo = resolvedLicenseInfo
+            .run { if (filterExcluded) filterExcluded() else this }
+            .filter(licenseView, filterSources = true)
+            .applyChoices(ruleSet.ortResult.getLicenseChoicesForId(pkg.metadata.id), licenseView)
+
+        effectiveResolvedLicenseInfo.forEach { resolvedLicense ->
+            if (separateEvaluationPerSource) {
                 resolvedLicense.sources.forEach { licenseSource ->
-                    licenseRules += LicenseRule(name, resolvedLicense, licenseSource).apply(block)
+                    licenseRules += LicenseRule(name, resolvedLicense, enumSetOf(licenseSource)).apply(block)
                 }
+            } else {
+                licenseRules += LicenseRule(name, resolvedLicense, resolvedLicense.sources).apply(block)
             }
+        }
     }
 
     fun issue(severity: Severity, message: String, howToFix: String) =
-        issue(severity, pkg.metadata.id, null, null, message, howToFix)
+        issue(severity, pkg.metadata.id, null, enumSetOf(), message, howToFix)
 
-    /**
-     * Add a [hint][Severity.HINT] to the list of [violations].
-     */
-    fun hint(message: String, howToFix: String) = hint(pkg.metadata.id, null, null, message, howToFix)
+    /** Add a [hint][Severity.HINT] to the list of [violations]. */
+    fun hint(message: String, howToFix: String) = hint(pkg.metadata.id, null, enumSetOf(), message, howToFix)
 
-    /**
-     * Add a [warning][Severity.WARNING] to the list of [violations].
-     */
-    fun warning(message: String, howToFix: String) = warning(pkg.metadata.id, null, null, message, howToFix)
+    /** Add a [warning][Severity.WARNING] to the list of [violations]. */
+    fun warning(message: String, howToFix: String) = warning(pkg.metadata.id, null, enumSetOf(), message, howToFix)
 
-    /**
-     * Add an [error][Severity.ERROR] to the list of [violations].
-     */
-    fun error(message: String, howToFix: String) = error(pkg.metadata.id, null, null, message, howToFix)
+    /** Add an [error][Severity.ERROR] to the list of [violations]. */
+    fun error(message: String, howToFix: String) = error(pkg.metadata.id, null, enumSetOf(), message, howToFix)
 
-    /**
-     * A [Rule] to check a single license of the [package][pkg].
-     */
+    /** A [Rule] to check a single license of the [package][pkg]. */
     inner class LicenseRule(
         name: String,
 
-        /**
-         * The [ResolvedLicense].
-         */
+        /** The [ResolvedLicense]. */
         val resolvedLicense: ResolvedLicense,
 
         /**
-         * The source of the license.
+         * The license sources to evaluate the rule for. Must not be empty and be contained in the [resolvedLicense].
          */
-        val licenseSource: LicenseSource
+        val licenseSources: EnumSet<LicenseSource>
     ) : Rule(ruleSet, name) {
-        /**
-         * A shortcut for the [license][ResolvedLicense.license] in [resolvedLicense].
-         */
+        init {
+            require(licenseSources.isNotEmpty()) {
+                "The given license sources must not be empty."
+            }
+
+            val invalidLicenseSources = licenseSources - resolvedLicense.sources
+            require(invalidLicenseSources.isEmpty()) {
+                "The license sources $invalidLicenseSources are not part of the resolved license."
+            }
+        }
+
+        /** Backwards compatibility */
+        @Suppress("unused") // This is intended to be used by rule implementations.
+        val licenseSource by lazy {
+            requireNotNull(licenseSources.singleOrNull()) {
+                "The license source is ambiguous. Please use the licenseSources property instead."
+            }
+        }
+
+        /** A shortcut for the [license][ResolvedLicense.license] in [resolvedLicense]. */
         val license = resolvedLicense.license
 
         /**
@@ -214,11 +277,11 @@ open class PackageRule(
          */
         fun pkg() = pkg
 
-        override val description = "\tEvaluating license rule '$name' for $licenseSource license " +
-                "'${resolvedLicense.license}'."
+        override val description = "\tEvaluating license rule '$name' for $licenseSources license " +
+            "'${resolvedLicense.license}'."
 
         override fun issueSource() =
-            "$name - ${pkg.metadata.id.toCoordinates()} - ${resolvedLicense.license} ($licenseSource)"
+            "$name - ${pkg.metadata.id.toCoordinates()} - ${resolvedLicense.license} ($licenseSources})"
 
         /**
          * A [RuleMatcher] that checks if a [detected][LicenseSource.DETECTED] license is
@@ -228,12 +291,11 @@ open class PackageRule(
             object : RuleMatcher {
                 override val description = "isDetectedExcluded($license)"
 
-                override fun matches() = licenseSource == LicenseSource.DETECTED && resolvedLicense.isDetectedExcluded
+                override fun matches() =
+                    licenseSources.singleOrNull() == LicenseSource.DETECTED && resolvedLicense.isDetectedExcluded
             }
 
-        /**
-         * A [RuleMatcher] that checks if the [license] is a valid SPDX license.
-         */
+        /** A [RuleMatcher] that checks if the [license] is a valid SPDX license. */
         fun isSpdxLicense() =
             object : RuleMatcher {
                 override val description = "isSpdxLicense($license)"
@@ -242,29 +304,23 @@ open class PackageRule(
                     when (license) {
                         !is SpdxLicenseReferenceExpression ->
                             license.isValid(SpdxExpression.Strictness.ALLOW_DEPRECATED)
+
                         else -> false
                     }
             }
 
         fun issue(severity: Severity, message: String, howToFix: String) =
-            issue(severity, pkg.metadata.id, license, licenseSource, message, howToFix)
+            issue(severity, pkg.metadata.id, license, licenseSources, message, howToFix)
 
-        /**
-         * Add a [hint][Severity.HINT] to the list of [violations].
-         */
-        fun hint(message: String, howToFix: String) =
-            hint(pkg.metadata.id, license, licenseSource, message, howToFix)
+        /** Add a [hint][Severity.HINT] to the list of [violations]. */
+        fun hint(message: String, howToFix: String) = hint(pkg.metadata.id, license, licenseSources, message, howToFix)
 
-        /**
-         * Add a [warning][Severity.WARNING] to the list of [violations].
-         */
+        /** Add a [warning][Severity.WARNING] to the list of [violations]. */
         fun warning(message: String, howToFix: String) =
-            warning(pkg.metadata.id, license, licenseSource, message, howToFix)
+            warning(pkg.metadata.id, license, licenseSources, message, howToFix)
 
-        /**
-         * Add an [error][Severity.ERROR] to the list of [violations].
-         */
+        /** Add an [error][Severity.ERROR] to the list of [violations]. */
         fun error(message: String, howToFix: String) =
-            error(pkg.metadata.id, license, licenseSource, message, howToFix)
+            error(pkg.metadata.id, license, licenseSources, message, howToFix)
     }
 }

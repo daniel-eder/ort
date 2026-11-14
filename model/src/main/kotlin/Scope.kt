@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,11 +19,11 @@
 
 package org.ossreviewtoolkit.model
 
-import java.util.SortedSet
+import com.fasterxml.jackson.databind.annotation.JsonSerialize
 
-/**
- * The scope class puts package dependencies into context.
- */
+import org.ossreviewtoolkit.model.utils.PackageReferenceSortedSetConverter
+
+/** The scope class puts package dependencies into context. */
 data class Scope(
     /**
      * The respective package manager's native name for the scope, e.g. "compile", "provided" etc. for Maven, or
@@ -39,8 +39,9 @@ data class Scope(
      * dependencies would not be test dependencies of the test dependencies, but compile dependencies of test
      * dependencies.
      */
-    val dependencies: SortedSet<PackageReference> = sortedSetOf()
-) : Comparable<Scope> {
+    @JsonSerialize(converter = PackageReferenceSortedSetConverter::class)
+    val dependencies: Set<PackageReference> = emptySet()
+) {
     /**
      * Return the set of package [Identifier]s in this [Scope], up to and including a depth of [maxDepth] where counting
      * starts at 0 (for the [Scope] itself) and 1 are direct dependencies etc. A value below 0 means to not limit the
@@ -60,19 +61,12 @@ data class Scope(
             }
         }
 
-    /**
-     * A comparison function to sort scopes by their name.
-     */
-    override fun compareTo(other: Scope) = compareValuesBy(this, other) { it.name }
-
-    /**
-     * Return whether the package identified by [id] is contained as a (transitive) dependency in this scope.
-     */
+    /** Return whether the package identified by [id] is contained as a (transitive) dependency in this scope. */
     operator fun contains(id: Identifier) = dependencies.any { it.id == id || it.dependsOn(id) }
 
-    /**
-     * Return all references to [id] as a dependency in this scope.
-     */
+    /** Return all references to [id] as a dependency in this scope. */
     fun findReferences(id: Identifier) =
         dependencies.filter { it.id == id } + dependencies.flatMap { it.findReferences(id) }
 }
+
+fun Collection<Scope>.collectDependencies(): Set<Identifier> = flatMapTo(mutableSetOf()) { it.collectDependencies() }

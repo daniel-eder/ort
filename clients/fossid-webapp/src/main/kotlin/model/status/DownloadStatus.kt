@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2020 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,8 +24,10 @@ import com.fasterxml.jackson.annotation.JsonProperty
 enum class DownloadStatus {
     FAILED,
     FINISHED,
+
     @JsonProperty("NOT FINISHED")
     NOT_FINISHED,
+
     @JsonProperty("NOT STARTED")
     NOT_STARTED
 }

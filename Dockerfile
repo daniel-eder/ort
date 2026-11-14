@@ -1,6 +1,8 @@
-# syntax=docker/dockerfile:1.3
+# syntax=devthefuture/dockerfile-x:v1.5.0
+# The above opts-in for an extended syntax that supports e.g. "INCLUDE" statements, see
+# https://codeberg.org/devthefuture/dockerfile-x
 
-# Copyright (C) 2020 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+# Copyright (C) 2020 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,344 +19,708 @@
 # SPDX-License-Identifier: Apache-2.0
 # License-Filename: LICENSE
 
+INCLUDE_ARGS .env.versions
+
 # Use OpenJDK Eclipe Temurin Ubuntu LTS
-FROM eclipse-temurin:11-jdk-jammy as ort-base-image
+FROM eclipse-temurin:$JAVA_VERSION-jdk-$UBUNTU_VERSION AS base
 
 ENV LANG=en_US.UTF-8
 ENV LANGUAGE=en_US:en
 ENV LC_ALL=en_US.UTF-8
 
-RUN echo $LANG > /etc/locale.gen \
-    && locale-gen en_US.UTF-8 \
-    && update-locale LANG=en_US.UTF-8
+# Check and set apt proxy
+COPY scripts/set_apt_proxy.sh /etc/scripts/set_apt_proxy.sh
+RUN /etc/scripts/set_apt_proxy.sh
 
 # Base package set
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+RUN --mount=type=cache,target=/var/cache,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update \
+    --mount=type=tmpfs,target=/var/log \
+    apt-get update -qq \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends extrepo \
+    && extrepo enable mise \
+    && apt-get update -qq \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     ca-certificates \
+    cmake \
     coreutils \
-    cvs \
     curl \
     dirmngr \
+    file \
     gcc \
     git \
+    git-lfs \
+    g++ \
     gnupg2 \
     iproute2 \
     libarchive-tools \
+    libffi-dev \
+    libgmp-dev \
+    libmagic1 \
+    libyaml-dev \
     libz-dev \
     locales \
+    lzma \
+    make \
+    mise \
     netbase \
     openssh-client \
     openssl \
     procps \
+    rng-tools5 \
     rsync \
     sudo \
     tzdata \
     uuid-dev \
     unzip \
-    wget \
     xz-utils \
-    && rm -rf /var/lib/apt/lists/*
+    && git lfs install
+
+RUN echo $LANG > /etc/locale.gen \
+    && locale-gen $LANG \
+    && update-locale LANG=$LANG
 
 ARG USERNAME=ort
 ARG USER_ID=1000
 ARG USER_GID=$USER_ID
 ARG HOMEDIR=/home/ort
-ENV HOME=$HOMEDIR
 
 # Non privileged user
-RUN groupadd --gid $USER_GID $USERNAME \
-    && useradd \
+RUN --mount=type=tmpfs,target=/var/log \
+    userdel -r ubuntu && \
+    groupadd --gid $USER_GID $USERNAME && \
+    useradd \
     --uid $USER_ID \
     --gid $USER_GID \
     --shell /bin/bash \
     --home-dir $HOMEDIR \
     --create-home $USERNAME
 
+RUN chgrp $USERNAME /opt \
+    && chmod g+wx /opt
+
 # sudo support
 RUN echo "$USERNAME ALL=(root) NOPASSWD:ALL" > /etc/sudoers.d/$USERNAME \
     && chmod 0440 /etc/sudoers.d/$USERNAME
 
-COPY docker/00-add_local_path.sh /etc/profile.d/
+# Make curl trust system certificates both at container build timeand run time.
+RUN echo "ca-native" > /etc/curlrc
 
-# Copy ort scripts
-COPY scripts /etc/scripts
+# Copy certificates scripts only.
+COPY scripts/*_certificates.sh /etc/scripts/
 
 # Set this to a directory containing CRT-files for custom certificates that ORT and all build tools should know about.
-ARG CRT_FILES=""
+ARG CRT_FILES="*.crt"
 COPY "$CRT_FILES" /tmp/certificates/
 
-RUN /etc/scripts/import_certificates.sh \
-    && if [ -n "$CRT_FILES" ]; then \
-        /etc/scripts/import_certificates.sh /tmp/certificates/; \
-    fi
+RUN /etc/scripts/export_proxy_certificates.sh /tmp/certificates/ \
+    && /etc/scripts/import_certificates.sh /tmp/certificates/
 
-#------------------------------------------------------------------------
-FROM ort-base-image AS build
+USER $USERNAME
+WORKDIR $HOMEDIR
+ENV USER=$USERNAME
+ENV HOME=$HOMEDIR
 
-#------------------------------------------------------------------------
-# Ubuntu build toolchain
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
-    --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        build-essential \
-        dpkg-dev \
-        libbluetooth-dev \
-        libbz2-dev \
-        libc6-dev \
-        libexpat1-dev \
-        libffi-dev \
-        libgmp-dev \
-        libgdbm-dev \
-        liblzma-dev \
-        libmpdec-dev \
-        libncursesw5-dev \
-        libreadline-dev \
-        libsqlite3-dev \
-        libssl-dev \
-        make \
-        tk-dev \
-        zlib1g-dev \
-    && rm -rf /var/lib/apt/lists/*
+# Make nodejs tools trust system certificates.
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
+
+ENTRYPOINT [ "/bin/bash" ]
 
 #------------------------------------------------------------------------
 # PYTHON - Build Python as a separate component with pyenv
-FROM build as pythonbuild
+FROM base AS python-build
 
-ARG PYTHON_VERSION=3.10.6
-ARG PYENV_GIT_TAG=v2.3.4
+ARG CONAN_VERSION
+ARG CONAN2_VERSION
+ARG PIP_VERSION
+# PYENV_GIT_TAG is consumed as described here:
+# https://github.com/pyenv/pyenv-installer/blob/63a9e6a216796aeba2535a3bac8e79ba5d95166d/README.rst?plain=1#L22.
+ARG PYENV_GIT_TAG
+ARG PYTHON_INSPECTOR_VERSION
+ARG PYTHON_PIPENV_VERSION
+ARG PYTHON_POETRY_PLUGIN_EXPORT_VERSION
+ARG PYTHON_POETRY_VERSION
+ARG PYTHON_SETUPTOOLS_VERSION
+ARG PYTHON_SETUPTOOLS_RUST_VERSION=1.13.0
+ARG PYTHON_VERSION
+ARG SCANCODE_VERSION
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    sudo apt-get update -qq \
+    && DEBIAN_FRONTEND=noninteractive sudo apt-get install -y --no-install-recommends \
+    libreadline-dev \
+    libgdbm-dev \
+    libicu-dev \
+    libsqlite3-dev \
+    libssl-dev \
+    libbz2-dev \
+    liblzma-dev \
+    tk-dev
 
 ENV PYENV_ROOT=/opt/python
-RUN curl -kSs https://pyenv.run | bash
-ENV PATH=${PYENV_ROOT}/shims:${PYENV_ROOT}/bin:$PATH
-RUN pyenv install -v ${PYTHON_VERSION}
-RUN pyenv global ${PYTHON_VERSION}
+ENV PATH=$PATH:$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PYENV_ROOT/conan2/bin
+RUN curl -kSs https://pyenv.run | bash \
+    && pyenv install -v $PYTHON_VERSION \
+    && pyenv global $PYTHON_VERSION
 
-COPY docker/python.sh /etc/profile.d
+RUN curl -Os https://raw.githubusercontent.com/aboutcode-org/scancode-toolkit/v$SCANCODE_VERSION/requirements.txt \
+    && if [ "$(arch)" = "aarch64" ]; then \
+        pip install -U --constraint requirements.txt scancode-toolkit-mini==$SCANCODE_VERSION licensedcode-data setuptools==$PYTHON_SETUPTOOLS_VERSION; \
+    else \
+        pip install -U --constraint requirements.txt scancode-toolkit==$SCANCODE_VERSION setuptools==$PYTHON_SETUPTOOLS_VERSION; \
+    fi \
+    && rm requirements.txt
 
-ARG CONAN_VERSION=1.52.0
-ARG PYTHON_INSPECTOR_VERSION=0.9.0
-ARG PYTHON_PIPENV_VERSION=2022.9.24
-ARG PYTHON_POETRY_VERSION=1.1.13
-ARG PIPTOOL_VERSION=22.2.2
-ARG SCANCODE_VERSION=30.1.0
-ENV PYENV_ROOT=/opt/python
-ENV PATH=${PYENV_ROOT}/shims:${PYENV_ROOT}/bin:$PATH
+# Extract ScanCode license texts to a directory.
+RUN scancode-license-data --path /opt/scancode-license-data \
+    && find /opt/scancode-license-data -type f -not -name "*.LICENSE" -exec rm -f {} + \
+    && rm -rf /opt/scancode-license-data/static
 
-# Scancode need restrict commoncode  version
-RUN pip install -U \
-    pip=="${PIPTOOL_VERSION}" \
+RUN pip install --no-cache-dir -U \
+    pip=="$PIP_VERSION" \
     wheel \
-    && pip install -U \
+    && pip install --no-cache-dir -U \
     Mercurial \
-    commoncode==30.0.0 \
-    conan=="${CONAN_VERSION}" \
-    pipenv=="${PYTHON_PIPENV_VERSION}" \
-    poetry==${PYTHON_POETRY_VERSION} \
-    python-inspector=="${PYTHON_INSPECTOR_VERSION}" \
-    scancode-toolkit==${SCANCODE_VERSION}
+    conan=="$CONAN_VERSION" \
+    pipenv=="$PYTHON_PIPENV_VERSION" \
+    poetry=="$PYTHON_POETRY_VERSION" \
+    poetry-plugin-export=="$PYTHON_POETRY_PLUGIN_EXPORT_VERSION" \
+    python-inspector=="$PYTHON_INSPECTOR_VERSION" \
+    setuptools=="$PYTHON_SETUPTOOLS_VERSION" \
+    setuptools_rust=="$PYTHON_SETUPTOOLS_RUST_VERSION"
+RUN mkdir /tmp/conan2 \
+    && curl -L https://github.com/conan-io/conan/releases/download/$CONAN2_VERSION/conan-$CONAN2_VERSION-linux-$(arch).tgz | tar -xz -C /tmp/conan2 \
+    # Rename the Conan 2 executable to "conan2" to be able to call both Conan version from the package manager.
+    && mkdir $PYENV_ROOT/conan2 && mv /tmp/conan2/bin $PYENV_ROOT/conan2/ \
+    && mv $PYENV_ROOT/conan2/bin/conan $PYENV_ROOT/conan2/bin/conan2
+
+RUN find /opt/python -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
 
 #------------------------------------------------------------------------
-# RUBY - Build Ruby as a separate component with rbenv
-FROM build as rubybuild
+# NODEJS - Build NodeJS as a separate component with fnm
+FROM base AS nodejs-build
 
-ARG COCOAPODS_VERSION=1.11.2
-ARG RUBY_VERSION=3.1.2
-ENV RBENV_ROOT=/opt/rbenv
-ENV PATH=${RBENV_ROOT}/bin:${RBENV_ROOT}/shims/:${RBENV_ROOT}/plugins/ruby-build/bin:$PATH
+ARG BOWER_VERSION
+ARG BUN_VERSION
+ARG COREPACK_VERSION
+ARG FNM_VERSION
+ARG NODEJS_VERSION
 
-RUN git clone --depth 1 https://github.com/rbenv/rbenv.git ${RBENV_ROOT}
-RUN git clone --depth 1 https://github.com/rbenv/ruby-build.git "$(rbenv root)"/plugins/ruby-build
-WORKDIR ${RBENV_ROOT}
-RUN src/configure \
-    && make -C src
-RUN rbenv install ${RUBY_VERSION} -v \
-    && rbenv global ${RUBY_VERSION} \
-    && gem install bundler cocoapods:${COCOAPODS_VERSION}
+ENV FNM_DIR=/opt/fnm
+ENV PATH=$PATH:$FNM_DIR:$FNM_DIR/node-versions/v$NODEJS_VERSION/installation/bin
 
-COPY docker/ruby.sh /etc/profile.d
+RUN mise install-into aqua:Schniz/fnm@$FNM_VERSION $FNM_DIR
+RUN fnm install "$NODEJS_VERSION" \
+    && fnm default "$NODEJS_VERSION" \
+    && npm install --global bower@$BOWER_VERSION bun@$BUN_VERSION corepack@$COREPACK_VERSION \
+    && corepack enable
 
 #------------------------------------------------------------------------
-# NODEJS - Build NodeJS as a separate component with nvm
-FROM build AS nodebuild
+# RUBY - Build Ruby as a separate component
+FROM base AS ruby-build
 
-ARG BOWER_VERSION=1.8.12
-ARG NODEJS_VERSION=16.17.1
-ARG NPM_VERSION=8.15.1
-ARG NVM_DIR=/opt/nvm
-ARG PNPM_VERSION=7.8.0
-ARG YARN_VERSION=1.22.10
+ARG COCOAPODS_VERSION
+ARG LICENSEE_VERSION
+ARG RUBY_VERSION
 
-RUN git clone --depth 1 https://github.com/nvm-sh/nvm.git $NVM_DIR
-RUN . $NVM_DIR/nvm.sh \
-    && nvm install "${NODEJS_VERSION}" \
-    && nvm alias default "${NODEJS_VERSION}" \
-    && nvm use default \
-    && npm install --global npm@$NPM_VERSION bower@$BOWER_VERSION pnpm@$PNPM_VERSION yarn@$YARN_VERSION
+ENV RUBY_ROOT=/opt/ruby
+RUN sudo mise install-into ruby@$RUBY_VERSION $RUBY_ROOT
+
+RUN sudo $RUBY_ROOT/bin/gem install cocoapods:$COCOAPODS_VERSION licensee:$LICENSEE_VERSION
 
 #------------------------------------------------------------------------
 # RUST - Build as a separate component
-FROM build AS rustbuild
+FROM base AS rust-build
 
-ARG RUST_HOME=/opt/rust
-ARG CARGO_HOME=${RUST_HOME}/cargo
-ARG RUSTUP_HOME=${RUST_HOME}/rustup
-ARG RUST_VERSION=1.64.0
-RUN curl -ksSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain ${RUST_VERSION}
+ARG RUST_VERSION
+
+ENV RUST_HOME=/opt/rust
+ENV CARGO_HOME=$RUST_HOME/cargo
+ENV RUSTUP_HOME=$RUST_HOME/rustup
+RUN curl -ksSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain $RUST_VERSION
 
 #------------------------------------------------------------------------
 # GOLANG - Build as a separate component
-FROM build AS gobuild
+FROM base AS go-build
 
-ARG GO_DEP_VERSION=0.5.4
-ARG GO_VERSION=1.18.3
-ENV GOPATH=/opt/go
-RUN curl -L https://dl.google.com/go/go${GO_VERSION}.linux-amd64.tar.gz | tar -C /opt -xz
-ENV PATH=/opt/go/bin:$PATH
-RUN go version
-RUN curl -ksS https://raw.githubusercontent.com/golang/dep/v$GO_DEP_VERSION/install.sh | bash
-RUN echo "add_local_path /opt/go/bin:\$PATH" > /etc/profile.d/go.sh
+ARG GO_VERSION
+
+ENV GOBIN=/opt/go/bin
+ENV PATH=$PATH:/opt/go/bin
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN ARCH=$(arch | sed s/aarch64/arm64/ | sed s/x86_64/amd64/) \
+    && curl -L https://dl.google.com/go/go$GO_VERSION.linux-$ARCH.tar.gz | tar -C /opt -xz
 
 #------------------------------------------------------------------------
 # HASKELL STACK
-FROM build AS haskellbuild
+FROM base AS haskell-build
 
-ARG HASKELL_STACK_VERSION=2.7.5
-RUN curl -sSL https://get.haskellstack.org/ | bash -s -- -d /usr/bin
+ARG HASKELL_STACK_VERSION
+
+ENV PATH=$PATH:$HOME/.ghcup/bin
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://get-ghcup.haskell.org | BOOTSTRAP_HASKELL_MINIMAL=1 BOOTSTRAP_HASKELL_NONINTERACTIVE=1 sh && \
+    ghcup install stack $HASKELL_STACK_VERSION && \
+    mv $HOME/.ghcup /opt/haskell
 
 #------------------------------------------------------------------------
 # REPO / ANDROID SDK
-FROM build AS androidbuild
+FROM base AS android-build
 
-ARG ANDROID_CMD_VERSION=8512546
+ARG ANDROID_CMD_VERSION
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    sudo apt-get update -qq \
+    && DEBIAN_FRONTEND=noninteractive sudo apt-get install -y --no-install-recommends \
+    unzip
+
 ENV ANDROID_HOME=/opt/android-sdk
 
-RUN curl -ksS https://storage.googleapis.com/git-repo-downloads/repo > /usr/bin/repo \
-    && chmod a+x /usr/bin/repo
-
-RUN curl -Os https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMD_VERSION}_latest.zip \
+RUN mkdir /tmp/android && chmod =1777 /tmp/android
+RUN --mount=type=tmpfs,target=/tmp/android \
+    cd /tmp/android \
+    && curl -Os https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMD_VERSION}_latest.zip \
     && unzip -q commandlinetools-linux-${ANDROID_CMD_VERSION}_latest.zip -d $ANDROID_HOME \
-    && rm commandlinetools-linux-${ANDROID_CMD_VERSION}_latest.zip \
     && PROXY_HOST_AND_PORT=${https_proxy#*://} \
+    && PROXY_HOST_AND_PORT=${PROXY_HOST_AND_PORT%/} \
     && if [ -n "$PROXY_HOST_AND_PORT" ]; then \
-    # While sdkmanager uses HTTPS by default, the proxy type is still called "http".
-    SDK_MANAGER_PROXY_OPTIONS="--proxy=http --proxy_host=${PROXY_HOST_AND_PORT%:*} --proxy_port=${PROXY_HOST_AND_PORT##*:}"; \
+        # While sdkmanager uses HTTPS by default, the proxy type is still called "http".
+        SDK_MANAGER_PROXY_OPTIONS="--proxy=http --proxy_host=${PROXY_HOST_AND_PORT%:*} --proxy_port=${PROXY_HOST_AND_PORT##*:}"; \
     fi \
-    && yes | $ANDROID_HOME/cmdline-tools/bin/sdkmanager $SDK_MANAGER_PROXY_OPTIONS \
-    --sdk_root=$ANDROID_HOME "platform-tools" "cmdline-tools;latest" \
-    && chmod -R o+rw $ANDROID_HOME
-COPY docker/android.sh /etc/profile.d
+    && yes | $ANDROID_HOME/cmdline-tools/bin/sdkmanager $SDK_MANAGER_PROXY_OPTIONS --sdk_root=$ANDROID_HOME "platform-tools" "cmdline-tools;latest"
+
+RUN curl -ksS https://storage.googleapis.com/git-repo-downloads/repo > $ANDROID_HOME/cmdline-tools/bin/repo \
+    && sudo chmod a+x $ANDROID_HOME/cmdline-tools/bin/repo
+
+RUN chmod -R o+rw "$ANDROID_HOME"
+
+#------------------------------------------------------------------------
+# Dart
+FROM base AS dart-build
+
+ARG DART_VERSION
+
+WORKDIR /opt/
+
+ENV DART_SDK=/opt/dart-sdk
+ENV PATH=$PATH:$DART_SDK/bin
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+RUN mkdir /tmp/dart && chmod =1777 /tmp/dart
+RUN --mount=type=tmpfs,target=/tmp/dart \
+    ARCH=$(arch | sed s/aarch64/arm64/ | sed s/x86_64/x64/) \
+    && curl -o /tmp/dart/dart.zip -L https://storage.googleapis.com/dart-archive/channels/stable/release/$DART_VERSION/sdk/dartsdk-linux-$ARCH-release.zip \
+    && unzip /tmp/dart/dart.zip
+
+#------------------------------------------------------------------------
+# SBT
+FROM base AS scala-build
+
+ARG SBT_VERSION
+
+ENV SBT_HOME=/opt/sbt
+ENV PATH=$PATH:$SBT_HOME/bin
+
+RUN curl -L https://github.com/sbt/sbt/releases/download/v$SBT_VERSION/sbt-$SBT_VERSION.tgz | tar -C /opt -xz
+
+#------------------------------------------------------------------------
+# SWIFT
+FROM base AS swift-build
+
+ARG SWIFT_VERSION
+
+ENV SWIFT_HOME=/opt/swift
+ENV PATH=$PATH:$SWIFT_HOME/bin
+
+RUN mkdir -p $SWIFT_HOME \
+    && echo $SWIFT_VERSION \
+    && if [ "$(arch)" = "aarch64" ]; then \
+        SWIFT_PACKAGE="ubuntu2404-aarch64/swift-$SWIFT_VERSION-RELEASE/swift-$SWIFT_VERSION-RELEASE-ubuntu24.04-aarch64.tar.gz"; \
+    else \
+        SWIFT_PACKAGE="ubuntu2404/swift-$SWIFT_VERSION-RELEASE/swift-$SWIFT_VERSION-RELEASE-ubuntu24.04.tar.gz"; \
+    fi \
+    && curl -L https://download.swift.org/swift-$SWIFT_VERSION-release/$SWIFT_PACKAGE \
+    | tar -xz -C $SWIFT_HOME --strip-components=2 \
+    # Prune Swift installation: remove debugging tools, IDE support, static libraries,
+    # sanitizers, and other components not needed for 'swift package show-dependencies'.
+    && rm -rf \
+    $SWIFT_HOME/bin/{*-swift-linux-musl-clang*,clangd,docc,lldb*,plutil,repl_swift,sourcekit-lsp,wasm-ld,wasmkit} \
+    $SWIFT_HOME/bin/llvm-{cov,objcopy,objdump,profdata,symbolizer} \
+    $SWIFT_HOME/bin/swift-{api-checker.py,build-sdk-interfaces,demangle,format,help} \
+    $SWIFT_HOME/lib/{clang/*/lib,liblldb*,libLTO*,libsourcekitdInProc.so,lldb,sourcekitd.framework,swift_static} \
+    $SWIFT_HOME/lib/swift/{embedded,FrameworkABIBaseline,migrator} \
+    $SWIFT_HOME/{libexec,local,share}
+
+#------------------------------------------------------------------------
+# DOTNET
+FROM base AS dotnet-build
+
+ARG DOTNET_VERSION
+ARG NUGET_INSPECTOR_VERSION
+
+ENV DOTNET_HOME=/opt/dotnet
+ENV NUGET_INSPECTOR_HOME=$DOTNET_HOME
+ENV PATH=$PATH:$DOTNET_HOME:$DOTNET_HOME/tools:$DOTNET_HOME/bin
+
+# Note: We are not installing a dotnet package directly because
+# debian packages from Ubuntu and Microsoft are incomplete
+
+RUN mkdir -p $DOTNET_HOME \
+    && echo $DOTNET_VERSION \
+    && if [ "$(arch)" = "aarch64" ]; then \
+        curl -L https://aka.ms/dotnet/$DOTNET_VERSION/dotnet-sdk-linux-arm64.tar.gz | tar -C $DOTNET_HOME -xz; \
+    else \
+        curl -L https://aka.ms/dotnet/$DOTNET_VERSION/dotnet-sdk-linux-x64.tar.gz | tar -C $DOTNET_HOME -xz; \
+    fi
+
+RUN mkdir -p $DOTNET_HOME/bin \
+    && curl -L https://github.com/aboutcode-org/nuget-inspector/releases/download/v$NUGET_INSPECTOR_VERSION/nuget-inspector-v$NUGET_INSPECTOR_VERSION-linux-x64.tar.gz \
+    | tar --strip-components=1 -C $DOTNET_HOME/bin -xz \
+    # Prune .NET installation: keep only the runtime needed for nuget-inspector.
+    && rm -rf $DOTNET_HOME/{templates,packs,sdk,sdk-manifests} \
+    && rm -rf $DOTNET_HOME/shared/Microsoft.AspNetCore.App
+
+#------------------------------------------------------------------------
+# BAZEL
+FROM base AS bazel-build
+
+ARG BAZELISK_VERSION
+ARG BUILDOZER_VERSION
+
+ENV BAZEL_HOME=/opt/bazel
+ENV GOBIN=/opt/go/bin
+
+RUN mkdir -p $BAZEL_HOME/bin \
+    && if [ "$(arch)" = "aarch64" ]; then \
+        curl -L https://github.com/bazelbuild/bazelisk/releases/download/v$BAZELISK_VERSION/bazelisk-linux-arm64 -o $BAZEL_HOME/bin/bazel; \
+    else \
+        curl -L https://github.com/bazelbuild/bazelisk/releases/download/v$BAZELISK_VERSION/bazelisk-linux-amd64 -o $BAZEL_HOME/bin/bazel; \
+    fi \
+    && chmod a+x $BAZEL_HOME/bin/bazel
+
+COPY --from=go-build /opt/go /opt/go
+
+RUN $GOBIN/go install github.com/bazelbuild/buildtools/buildozer@$BUILDOZER_VERSION && chmod a+x $GOBIN/buildozer
+
+#------------------------------------------------------------------------
+# Cosign for signature verification
+FROM ghcr.io/sigstore/cosign/cosign:v$COSIGN_VERSION AS cosign
+
+#------------------------------------------------------------------------
+# Elixir (Mix SBoM)
+FROM base AS mix-sbom-build
+
+COPY --from=cosign /ko-app/cosign /usr/local/bin/cosign
+
+ARG MIX_SBOM_VERSION
+
+ENV MIX_SBOM_HOME=/opt/mix_sbom
+
+# Download and verify mix_sbom binary signature
+RUN mkdir -p $MIX_SBOM_HOME/bin \
+    && ARCH=$(arch | sed s/aarch64/ARM64/ | sed s/x86_64/X64/) \
+    && curl -sSL "https://github.com/erlef/mix_sbom/releases/download/v${MIX_SBOM_VERSION}/mix_sbom_Linux_${ARCH}" \
+       -o $MIX_SBOM_HOME/bin/mix_sbom \
+    && curl -sSL "https://github.com/erlef/mix_sbom/releases/download/v${MIX_SBOM_VERSION}/mix_sbom_Linux_${ARCH}.sigstore" \
+       -o /tmp/mix_sbom.sigstore \
+    && cosign verify-blob \
+       --bundle /tmp/mix_sbom.sigstore \
+       --certificate-identity-regexp "^https://github.com/erlef/mix_sbom/.*@refs/tags/v${MIX_SBOM_VERSION}$" \
+       --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+       $MIX_SBOM_HOME/bin/mix_sbom \
+    && chmod a+x $MIX_SBOM_HOME/bin/mix_sbom \
+    && rm /tmp/mix_sbom.sigstore \
+    && $MIX_SBOM_HOME/bin/mix_sbom --version
+
+#------------------------------------------------------------------------
+# Erlang (Rebar3 SBoM wrapped in Bombom)
+FROM base AS rebar3-sbom-build
+
+COPY --from=cosign /ko-app/cosign /usr/local/bin/cosign
+
+ARG BOMBOM_VERSION
+
+ENV BOMBOM_HOME=/opt/bombom
+
+# Download and verify bombom binary signature
+RUN mkdir -p $BOMBOM_HOME/bin \
+    && ARCH=$(arch | sed s/aarch64/arm64/ | sed s/x86_64/amd64/) \
+    && curl -sSL "https://github.com/erlef/bombom/releases/download/${BOMBOM_VERSION}/bombom-linux-${ARCH}.bin" \
+       -o $BOMBOM_HOME/bin/bombom \
+    && curl -sSL "https://github.com/erlef/bombom/releases/download/${BOMBOM_VERSION}/bombom-linux-${ARCH}.bin.sigstore" \
+       -o /tmp/bombom.sigstore \
+    && cosign verify-blob \
+       --bundle /tmp/bombom.sigstore \
+       --certificate-identity-regexp "^https://github.com/erlef/bombom/.*@refs/tags/${BOMBOM_VERSION}$" \
+       --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+       $BOMBOM_HOME/bin/bombom \
+    && chmod a+x $BOMBOM_HOME/bin/bombom \
+    && rm /tmp/bombom.sigstore
 
 #------------------------------------------------------------------------
 # ORT
-FROM build as ortbuild
+FROM base AS ort-build
 
 # Set this to the version ORT should report.
 ARG ORT_VERSION="DOCKER-SNAPSHOT"
 
-COPY . /usr/local/src/ort
-WORKDIR /usr/local/src/ort
+WORKDIR $HOME/src/ort
 
 # Prepare Gradle
-RUN scripts/import_proxy_certs.sh /usr/local/src/ort/gradle.properties \
+RUN --mount=type=cache,target=/var/tmp/gradle \
+    --mount=type=bind,target=$HOME/src/ort,rw \
+    export GRADLE_USER_HOME=/var/tmp/gradle \
+    && sudo chown -R $USER $HOME/src/ort /var/tmp/gradle \
     && scripts/set_gradle_proxy.sh \
-    && ./gradlew --no-daemon --stacktrace -Pversion=$ORT_VERSION :cli:distTar :helper-cli:startScripts
-
-RUN mkdir -p /opt/ort \
-    && tar xf /usr/local/src/ort/cli/build/distributions/ort-$ORT_VERSION.tar -C /opt/ort --strip-components 1 \
-    && cp -a /usr/local/src/ort/scripts/*.sh /opt/ort/bin/ \
-    && cp -a /usr/local/src/ort/helper-cli/build/scripts/orth /opt/ort/bin/ \
-    && cp -a /usr/local/src/ort/helper-cli/build/libs/helper-cli-*.jar /opt/ort/lib/ \
-    && cd \
-    && rm -rf /usr/local/src
+    && ./gradlew --no-daemon --stacktrace \
+    -Pversion=$ORT_VERSION \
+    :cli:installDist \
+    :cli-helper:startScripts \
+    && mkdir /opt/ort \
+    && cp -a $HOME/src/ort/cli/build/install/ort /opt/ \
+    && cp -a $HOME/src/ort/scripts/*.sh /opt/ort/bin/ \
+    && cp -a $HOME/src/ort/cli-helper/build/scripts/orth /opt/ort/bin/ \
+    && cp -a $HOME/src/ort/cli-helper/build/libs/cli-helper-*.jar /opt/ort/lib/
 
 #------------------------------------------------------------------------
-# Main container
-FROM ort-base-image as run
+# Gleam
+FROM base AS gleam-build
+
+COPY --from=cosign /ko-app/cosign /usr/local/bin/cosign
+
+ARG GLEAM_VERSION
+
+ENV GLEAM_HOME=/opt/gleam
+
+# Download and verify Gleam binary signature
+RUN mkdir -p $GLEAM_HOME/bin \
+    && ARCH=$(arch) \
+    && curl -sSL "https://github.com/gleam-lang/gleam/releases/download/v${GLEAM_VERSION}/gleam-v${GLEAM_VERSION}-${ARCH}-unknown-linux-musl.tar.gz" \
+       -o /tmp/gleam.tar.gz \
+    && curl -sSL "https://github.com/gleam-lang/gleam/releases/download/v${GLEAM_VERSION}/gleam-v${GLEAM_VERSION}-${ARCH}-unknown-linux-musl.tar.gz.sigstore" \
+       -o /tmp/gleam.sigstore \
+    && cosign verify-blob \
+       --bundle /tmp/gleam.sigstore \
+       --certificate-identity-regexp "^https://github.com/gleam-lang/gleam/.*@refs/tags/v${GLEAM_VERSION}$" \
+       --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+       /tmp/gleam.tar.gz \
+    && tar -xzf /tmp/gleam.tar.gz -C $GLEAM_HOME/bin \
+    && chmod a+x $GLEAM_HOME/bin/gleam \
+    && rm /tmp/gleam.tar.gz /tmp/gleam.sigstore \
+    && $GLEAM_HOME/bin/gleam --version
+
+#------------------------------------------------------------------------
+# cargo-credential-netrc
+FROM rust-build AS cargo-credential-netrc-build
+
+ENV PATH=$PATH:$CARGO_HOME/bin
+
+RUN cargo install cargo-credential-netrc --locked --root /opt/cargo-credential-netrc
+
+#------------------------------------------------------------------------
+# Container with minimal selection of supported package managers.
+FROM base AS minimal-tools
+
+ARG NODEJS_VERSION
 
 # Remove ort build scripts
-RUN rm -rf /etc/scripts
+RUN sudo rm -rf /etc/scripts
+
+# Install optional tool subversion for ORT analyzer
+RUN --mount=type=cache,target=/var/cache,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    --mount=type=tmpfs,target=/var/log \
+    sudo apt-get update && \
+    DEBIAN_FRONTEND=noninteractive sudo apt-get install -y --no-install-recommends \
+    subversion
 
 # Python
-ARG PYENV_ROOT=/opt/python
-COPY --chown=$USERNAME:$USERNAME --from=pythonbuild ${PYENV_ROOT} ${PYENV_ROOT}
-COPY --from=pythonbuild /etc/profile.d/python.sh /etc/profile.d/
-RUN chmod o+rwx ${PYENV_ROOT}
-
-# Ruby
-ARG RBENV_ROOT=/opt/rbenv/
-COPY --chown=$USERNAME:$USERNAME --from=rubybuild ${RBENV_ROOT} ${RBENV_ROOT}
-COPY --from=rubybuild /etc/profile.d/ruby.sh /etc/profile.d/
-RUN chmod o+rwx ${RBENV_ROOT}
+ENV PYENV_ROOT=/opt/python
+ENV PATH=$PATH:$PYENV_ROOT/shims:$PYENV_ROOT/bin:$PYENV_ROOT/conan2/bin
+COPY --from=python-build --chown=$USER:$USER $PYENV_ROOT $PYENV_ROOT
 
 # NodeJS
-ARG NODEJS_VERSION=16.17.1
-ARG NVM_DIR=/opt/nvm
-ENV NODE_PATH $NVM_DIR/v$NODEJS_VERSION/lib/node_modules
-ENV PATH $NVM_DIR/versions/node/v$NODEJS_VERSION/bin:$PATH
-COPY --chown=$USERNAME:$USERNAME --from=nodebuild ${NVM_DIR} ${NVM_DIR}
-RUN chmod o+rwx ${NVM_DIR}
+ENV FNM_DIR=/opt/fnm
+ENV PATH=$PATH:$FNM_DIR:$FNM_DIR/node-versions/v$NODEJS_VERSION/installation/bin
+COPY --from=nodejs-build --chown=$USER:$USER $FNM_DIR $FNM_DIR
+RUN chmod -R a+w $FNM_DIR/node-versions
 
 # Rust
-ARG RUST_HOME=/opt/rust
-ARG CARGO_HOME=${RUST_HOME}/cargo
-COPY --chown=$USERNAME:$USERNAME --from=rustbuild /opt/rust /opt/rust
-COPY docker/rust.sh /etc/profile.d/
-RUN chmod o+rwx ${CARGO_HOME}
+ENV RUST_HOME=/opt/rust
+ENV CARGO_HOME=$RUST_HOME/cargo
+ENV RUSTUP_HOME=$RUST_HOME/rustup
+ENV PATH=$PATH:$CARGO_HOME/bin:$RUSTUP_HOME/bin
+COPY --from=rust-build --chown=$USER:$USER $RUST_HOME $RUST_HOME
+RUN chmod o+rwx $CARGO_HOME
+
+# cargo-credential-netrc
+ENV CARGO_CREDENTIAL_NETRC_HOME=/opt/cargo-credential-netrc
+ENV PATH=$PATH:$CARGO_CREDENTIAL_NETRC_HOME/bin
+COPY --from=cargo-credential-netrc-build $CARGO_CREDENTIAL_NETRC_HOME $CARGO_CREDENTIAL_NETRC_HOME
 
 # Golang
-COPY --chown=$USERNAME:$USERNAME --from=gobuild /opt/go /opt/go/
-COPY --from=gobuild  /etc/profile.d/go.sh /etc/profile.d/
+ENV PATH=$PATH:/opt/go/bin
+COPY --from=go-build --chown=$USER:$USER /opt/go /opt/go
 
-# Haskell
-COPY --from=haskellbuild /usr/bin/stack /usr/bin
+# Ruby
+ENV RUBY_ROOT=/opt/ruby
+ENV GEM_HOME=/var/tmp/gem
+ENV PATH=$PATH:$RUBY_ROOT/bin
+COPY --from=ruby-build --chown=$USER:$USER $RUBY_ROOT $RUBY_ROOT
+
+COPY --from=python-build --chown=$USER:$USER /opt/scancode-license-data /opt/scancode-license-data
+
+# FOSSology-nomossa
+ARG FOSSOLOGY_NOMOSSA_VERSION
+
+RUN mkdir -p /opt/FOSSology-nomossa/bin && \
+    curl -sSL https://github.com/fossology/fossology/releases/download/$FOSSOLOGY_NOMOSSA_VERSION/FOSSology-nomossa \
+    -o /opt/FOSSology-nomossa/bin/FOSSology-nomossa \
+    && chmod +x /opt/FOSSology-nomossa/bin/FOSSology-nomossa
+
+ENV PATH=$PATH:/opt/FOSSology-nomossa/bin
+
+#------------------------------------------------------------------------
+# Container with all supported package managers.
+FROM minimal-tools AS all-tools
+
+ARG ABOM_VERSION
+ARG COMPOSER_VERSION
+ARG PHP_VERSION
+ARG PROVENANT_VERSION
+ARG UBUNTU_VERSION
+
+ENV ABOM_HOME=/opt/abom
+ENV PATH=$PATH:$ABOM_HOME
+RUN sudo mise install-into github:JulietSecurity/abom@$ABOM_VERSION $ABOM_HOME
 
 # Repo and Android
 ENV ANDROID_HOME=/opt/android-sdk
-COPY --from=androidbuild /usr/bin/repo /usr/bin/
-COPY --from=androidbuild /etc/profile.d/android.sh /etc/profile.d/
-COPY --chown=$USERNAME:$USERNAME --from=androidbuild ${ANDROID_HOME} ${ANDROID_HOME}
-RUN chmod o+rw ${ANDROID_HOME}
+ENV ANDROID_SDK_ROOT=$ANDROID_HOME
+ENV ANDROID_USER_HOME=$HOME/.android
+ENV PATH=$PATH:$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/cmdline-tools/bin
+ENV PATH=$PATH:$ANDROID_HOME/platform-tools
+COPY --from=android-build --chown=$USER:$USER $ANDROID_HOME $ANDROID_HOME
+RUN chmod o+rw $ANDROID_HOME
 
-# External repositories for SBT
-ARG SBT_VERSION=1.6.1
-RUN KEYURL="https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x2EE0EA64E40A89B84B2DF73499E82A75642AC823" \
-    && echo "deb https://repo.scala-sbt.org/scalasbt/debian all main" | tee /etc/apt/sources.list.d/sbt.list \
-    && echo "deb https://repo.scala-sbt.org/scalasbt/debian /" | tee /etc/apt/sources.list.d/sbt_old.list \
-    && curl -ksS "$KEYURL" | gpg --dearmor | tee "/etc/apt/trusted.gpg.d/scala_ubuntu.gpg" > /dev/null
-
-# External repository for Dart
-RUN KEYURL="https://dl-ssl.google.com/linux/linux_signing_key.pub" \
-    && LISTURL="https://storage.googleapis.com/download.dartlang.org/linux/debian/dart_stable.list" \
-    && curl -ksS "$KEYURL" | gpg --dearmor | tee "/etc/apt/trusted.gpg.d/dart.gpg" > /dev/null \
-    && curl -ksS "$LISTURL" > /etc/apt/sources.list.d/dart.list \
-    && echo "add_local_path /usr/lib/dart/bin:\$PATH" > /etc/profile.d/dart.sh
-
-# Apt install commands.
-RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+# Swift
+ENV SWIFT_HOME=/opt/swift
+ENV PATH=$PATH:$SWIFT_HOME/bin
+COPY --from=swift-build --chown=$USER:$USER $SWIFT_HOME $SWIFT_HOME
+RUN --mount=type=cache,target=/var/cache,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
-    apt-get update && \
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        dart \
-        php \
-        sbt=$SBT_VERSION \
-        subversion \
-    && rm -rf /var/lib/apt/lists/*
+    --mount=type=tmpfs,target=/var/log \
+    sudo apt-get update \
+    && DEBIAN_FRONTEND=noninteractive sudo apt-get install -y --no-install-recommends libncurses6
 
-# PHP composer
-ARG COMPOSER_VERSION=2.2
-RUN curl -ksS https://getcomposer.org/installer | php -- --install-dir=/bin --filename=composer --$COMPOSER_VERSION
+# Scala
+ENV SBT_HOME=/opt/sbt
+ENV PATH=$PATH:$SBT_HOME/bin
+COPY --from=scala-build --chown=$USER:$USER $SBT_HOME $SBT_HOME
+
+# Dart
+ENV DART_SDK=/opt/dart-sdk
+ENV PATH=$PATH:$DART_SDK/bin
+COPY --from=dart-build --chown=$USER:$USER $DART_SDK $DART_SDK
+
+# Dotnet
+ENV DOTNET_HOME=/opt/dotnet
+ENV NUGET_INSPECTOR_HOME=$DOTNET_HOME
+ENV PATH=$PATH:$DOTNET_HOME:$DOTNET_HOME/tools:$DOTNET_HOME/bin
+
+COPY --from=dotnet-build --chown=$USER:$USER $DOTNET_HOME $DOTNET_HOME
+
+# PHP
+RUN --mount=type=cache,target=/var/cache,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    --mount=type=tmpfs,target=/var/log \
+    curl -fsSL "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x14aa40ec0831756756d7f66c4f4ea0aae5267a6c" | sudo gpg --dearmor -o /usr/share/keyrings/ondrej-php-keyring.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/ondrej-php-keyring.gpg] https://ppa.launchpadcontent.net/ondrej/php/ubuntu $UBUNTU_VERSION main" | sudo tee /etc/apt/sources.list.d/ondrej-php.list \
+    && sudo apt-get update \
+    && DEBIAN_FRONTEND=noninteractive sudo apt-get install -y --no-install-recommends php${PHP_VERSION}-cli
+
+RUN mkdir -p /opt/php/bin \
+    && curl -ksS https://getcomposer.org/installer | php -- --install-dir=/opt/php/bin --filename=composer --$COMPOSER_VERSION
+
+ENV PATH=$PATH:/opt/php/bin
+
+# Haskell
+ENV HASKELL_HOME=/opt/haskell
+ENV PATH=$PATH:$HASKELL_HOME/bin
+
+COPY --from=haskell-build /opt/haskell /opt/haskell
+
+# Bazel
+ENV BAZEL_HOME=/opt/bazel
+ENV PATH=$PATH:$BAZEL_HOME/bin
+
+COPY --from=bazel-build $BAZEL_HOME $BAZEL_HOME
+COPY --from=bazel-build --chown=$USER:$USER /opt/go/bin/buildozer /opt/go/bin/buildozer
+
+# Gleam
+ENV GLEAM_HOME=/opt/gleam
+ENV PATH=$PATH:$GLEAM_HOME/bin
+COPY --from=gleam-build --chown=$USER:$USER $GLEAM_HOME $GLEAM_HOME
+
+# Elixir (Mix SBoM)
+ENV MIX_SBOM_HOME=/opt/mix_sbom
+ENV PATH=$PATH:$MIX_SBOM_HOME/bin
+COPY --from=mix-sbom-build --chown=$USER:$USER $MIX_SBOM_HOME $MIX_SBOM_HOME
+
+# Erlang (Rebar3 SBoM wrapped in Bombom)
+ENV BOMBOM_HOME=/opt/bombom
+ENV PATH=$PATH:$BOMBOM_HOME/bin
+COPY --from=rebar3-sbom-build --chown=$USER:$USER $BOMBOM_HOME $BOMBOM_HOME
+
+# Provenant
+ENV PROVENANT_HOME=/opt/provenant
+ENV PATH=$PATH:$PROVENANT_HOME
+RUN sudo mise install-into github:getprovenant/provenant@$PROVENANT_VERSION $PROVENANT_HOME
+
+#------------------------------------------------------------------------
+# Runtime container with minimal selection of supported package managers pre-installed.
+FROM minimal-tools AS minimal
 
 # ORT
-COPY --chown=$USERNAME:$USERNAME --from=ortbuild /opt/ort /opt/ort
-COPY docker/ort-wrapper.sh /usr/bin/ort
-COPY docker/ort-wrapper.sh /usr/bin/orth
-RUN chmod 755 /usr/bin/ort
+COPY --from=ort-build --chown=$USER:$USER /opt/ort /opt/ort
+ENV PATH=$PATH:/opt/ort/bin
 
-USER $USERNAME
-WORKDIR $HOMEDIR
+USER $USER
+WORKDIR $HOME
 
-ENTRYPOINT ["/usr/bin/ort"]
+# Ensure that these directories exist in the container to be able to mount directories from the host into them with correct permissions.
+RUN mkdir -p "$HOME/.ort" "$HOME/.gradle"
+
+ENTRYPOINT ["/opt/ort/bin/ort"]
+
+#------------------------------------------------------------------------
+# Runtime container with all supported package managers pre-installed.
+FROM all-tools AS run
+
+ARG HOMEDIR=/home/ort
+ARG USER_ID=1000
+ARG USER_GID=$USER_ID
+
+# ORT
+COPY --from=ort-build --chown=$USER:$USER /opt/ort /opt/ort
+ENV PATH=$PATH:/opt/ort/bin
+
+USER $USER
+WORKDIR $HOME
+
+# Ensure that these directories exist in the container to be able to mount directories from the host into them with correct permissions.
+RUN mkdir -p "$HOME/.ort" "$HOME/.gradle"
+
+# Verify that all tools required by ORT are available.
+# Mount /tmp and $HOMEDIR as cache to prevent temporary files from being persisted to the image.
+RUN --mount=type=tmpfs,target=/tmp \
+    --mount=type=cache,target=$HOMEDIR,uid=$USER_ID,gid=$USER_GID \
+    ort requirements
+
+ENTRYPOINT ["/opt/ort/bin/ort"]

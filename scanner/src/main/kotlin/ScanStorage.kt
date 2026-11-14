@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,6 @@
 package org.ossreviewtoolkit.scanner
 
 import org.ossreviewtoolkit.model.ArtifactProvenance
-import org.ossreviewtoolkit.model.Identifier
 import org.ossreviewtoolkit.model.KnownProvenance
 import org.ossreviewtoolkit.model.Package
 import org.ossreviewtoolkit.model.Provenance
@@ -30,68 +29,45 @@ import org.ossreviewtoolkit.model.UnknownProvenance
 import org.ossreviewtoolkit.scanner.provenance.NestedProvenance
 import org.ossreviewtoolkit.scanner.provenance.NestedProvenanceScanResult
 
-/**
- * A reader that reads [ScanResult]s from a storage.
- */
+/** A reader that reads [ScanResult]s from a storage. */
 sealed interface ScanStorageReader
 
-/**
- * A [ScanStorageReader]s that reads [ScanResult]s from a storage that stores results associated to [Package]s.
- */
+/** A [ScanStorageReader]s that reads [ScanResult]s from a storage that stores results associated to [Package]s. */
 interface PackageBasedScanStorageReader : ScanStorageReader {
     /**
-     * Read all [ScanResult]s for the provided [id]. The package scan results are converted to a
-     * [NestedProvenanceScanResult] using the provided [nestedProvenance].
-     *
-     * Throws a [ScanStorageException] if an error occurs while reading from the storage.
-     */
-    fun read(id: Identifier, nestedProvenance: NestedProvenance): List<NestedProvenanceScanResult>
-
-    /**
-     * Read all [ScanResult]s for the provided [package][pkg] matching the [provenance][KnownProvenance.matches] and the
-     * [scannerCriteria]. The package scan results are converted to a [NestedProvenanceScanResult] using the provided
+     * Read all [ScanResult]s for the provided [package][pkg]. The results have to match the
+     * [provenance][KnownProvenance.matches] of the package and can optionally be filtered by the provided
+     * [scannerMatcher]. The results are converted to a [NestedProvenanceScanResult] using the provided
      * [nestedProvenance].
      *
      * Throws a [ScanStorageException] if an error occurs while reading from the storage.
      */
-    fun read(
+    suspend fun read(
         pkg: Package,
         nestedProvenance: NestedProvenance,
-        scannerCriteria: ScannerCriteria
+        scannerMatcher: ScannerMatcher? = null
     ): List<NestedProvenanceScanResult>
 }
 
-/**
- * A [ScanStorageReader] that reads [ScanResult]s from a storage that stores results associated to [Provenance]s.
- */
+/** A [ScanStorageReader] that reads [ScanResult]s from a storage that stores results associated to [Provenance]s. */
 interface ProvenanceBasedScanStorageReader : ScanStorageReader {
     /**
      * Read all [ScanResult]s for the provided [provenance]. If the [provenance] is an [ArtifactProvenance], the URL and
      * the hash value must match. If the [provenance] is a [RepositoryProvenance], the VCS type and URL, and the
      * resolved revision must match. The VCS revision is ignored, because the resolved revision already defines what was
-     * scanned.
+     * scanned. Scan results can optionally be filtered by the provided [scannerMatcher].
      *
      * A [ScanStorageException] is thrown if:
      * * An error occurs while reading from the storage.
      * * The [provenance] is a [RepositoryProvenance] with a non-empty VCS path.
      */
-    fun read(provenance: KnownProvenance): List<ScanResult>
-
-    /**
-     * Like [read], but also filters by the provided [scannerCriteria].
-     */
-    fun read(provenance: KnownProvenance, scannerCriteria: ScannerCriteria): List<ScanResult> =
-        read(provenance).filter { scannerCriteria.matches(it.scanner) }
+    suspend fun read(provenance: KnownProvenance, scannerMatcher: ScannerMatcher? = null): List<ScanResult>
 }
 
-/**
- * A writer that writes [ScanResult]s to a storage.
- */
+/** A writer that writes [ScanResult]s to a storage. */
 sealed interface ScanStorageWriter
 
-/**
- * A [ScanStorageWriter] that writes [ScanResult]s to a storage that stores results associated to [Package]s.
- */
+/** A [ScanStorageWriter] that writes [ScanResult]s to a storage that stores results associated to [Package]s. */
 interface PackageBasedScanStorageWriter : ScanStorageWriter {
     /**
      * Write the provided [nestedProvenanceScanResult] to the storage, associated to the provided [package][pkg].
@@ -101,25 +77,23 @@ interface PackageBasedScanStorageWriter : ScanStorageWriter {
      * * The storage already contains a result for the same provenance and scanner.
      * * The provenance of the package is [unknown][UnknownProvenance].
      */
-    fun write(pkg: Package, nestedProvenanceScanResult: NestedProvenanceScanResult)
+    suspend fun write(pkg: Package, nestedProvenanceScanResult: NestedProvenanceScanResult)
 }
 
-/**
- * A [ScanStorageWriter] that writer [ScanResult]s to a storage that stores results by their [Provenance].
- */
+/** A [ScanStorageWriter] that writer [ScanResult]s to a storage that stores results by their [Provenance]. */
 interface ProvenanceBasedScanStorageWriter : ScanStorageWriter {
     /**
      * Write the provided [scanResult] to the storage. The [scanResult] must have a [KnownProvenance], and if it has a
      * [RepositoryProvenance] the VCS path must be empty, because only scan results for complete repositories are
-     * stored.
+     * stored. If the storage already contains a result for the same storage key, the write operation is skipped
+     * and false is returned.
      *
      * A [ScanStorageException] is thrown if:
      * * An error occurs while writing to the storage.
-     * * The storage already contains a result for the same provenance and scanner.
      * * The provenance of the [scanResult] is [unknown][UnknownProvenance].
      * * The provenance of the [scanResult] is a [RepositoryProvenance] with a non-empty VCS path.
      */
-    fun write(scanResult: ScanResult)
+    suspend fun write(scanResult: ScanResult): Boolean
 }
 
 /**

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,15 +23,23 @@ import io.kotest.matchers.Matcher
 import io.kotest.matchers.collections.containExactly
 import io.kotest.matchers.neverNullMatcher
 
-import org.ossreviewtoolkit.utils.spdx.SpdxExpression
-import org.ossreviewtoolkit.utils.spdx.SpdxSingleLicenseExpression
+import org.ossreviewtoolkit.model.Identifier
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxExpression
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxSingleLicenseExpression
 
-object TestUtils {
-    fun containLicensesExactly(vararg licenses: String): Matcher<Iterable<ResolvedLicense>?> =
-        neverNullMatcher { value ->
-            val expected = licenses.map { SpdxExpression.parse(it) as SpdxSingleLicenseExpression }.toSet()
-            val actual = value.map { it.license }.toSet()
+fun containLicensesExactly(vararg licenses: String): Matcher<Iterable<ResolvedLicense>?> =
+    neverNullMatcher { value ->
+        val expected = licenses.mapTo(mutableSetOf()) { SpdxExpression.parse(it) as SpdxSingleLicenseExpression }
+        val actual = value.mapTo(mutableSetOf()) { it.license }
 
-            containExactly(expected).test(actual)
-        }
+        containExactly(expected).test(actual)
+    }
+
+class SimpleLicenseInfoProvider(licenseInfo: List<LicenseInfo>) : LicenseInfoProvider {
+    private val licenseInfoById = licenseInfo.associateBy { it.id }
+
+    override fun get(id: Identifier) =
+        licenseInfoById[id] ?: throw IllegalArgumentException("No license info for '${id.toCoordinates()}' available.")
+
+    fun getIdentifiers(): Set<Identifier> = licenseInfoById.keys
 }

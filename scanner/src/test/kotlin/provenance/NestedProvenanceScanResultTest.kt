@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2022 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,9 +20,10 @@
 package org.ossreviewtoolkit.scanner.provenance
 
 import io.kotest.core.spec.style.WordSpec
-import io.kotest.matchers.collections.shouldContainExactly
-import io.kotest.matchers.collections.shouldContainExactlyInAnyOrder
+import io.kotest.matchers.collections.containExactly
+import io.kotest.matchers.collections.containExactlyInAnyOrder
 import io.kotest.matchers.collections.shouldNotContain
+import io.kotest.matchers.should
 import io.kotest.matchers.shouldBe
 
 import org.ossreviewtoolkit.model.CopyrightFinding
@@ -44,7 +45,7 @@ class NestedProvenanceScanResultTest : WordSpec({
             val filteredResult = nestedProvenanceScanResult.filterByVcsPath("submodules/a")
             val repositories = filteredResult.nestedProvenance.getRepositoryUrls()
 
-            repositories shouldContainExactlyInAnyOrder listOf(
+            repositories should containExactlyInAnyOrder(
                 provenanceRoot.vcsInfo.url,
                 provenanceSubmoduleA.vcsInfo.url
             )
@@ -54,7 +55,7 @@ class NestedProvenanceScanResultTest : WordSpec({
             val filteredResult = nestedProvenanceScanResult.filterByVcsPath("submodules/a/dir")
             val repositories = filteredResult.nestedProvenance.getRepositoryUrls()
 
-            repositories shouldContainExactlyInAnyOrder listOf(
+            repositories should containExactlyInAnyOrder(
                 provenanceRoot.vcsInfo.url,
                 provenanceSubmoduleA.vcsInfo.url
             )
@@ -66,7 +67,7 @@ class NestedProvenanceScanResultTest : WordSpec({
             (filteredResult.nestedProvenance.root as RepositoryProvenance).vcsInfo.path shouldBe "submodules/a/dir"
             filteredResult.nestedProvenance.subRepositories.getValue("submodules/a").vcsInfo.path shouldBe "dir"
 
-            filteredResult.getProvenances().forEach {
+            filteredResult.nestedProvenance.allProvenances.forEach {
                 filteredResult.scanResults.getValue(it).single().provenance shouldBe it
             }
         }
@@ -76,7 +77,7 @@ class NestedProvenanceScanResultTest : WordSpec({
                 with(filteredResult.scanResults.getValue(filteredResult.nestedProvenance.root).single()) {
                     summary.licenseFindings shouldNotContain LicenseFinding("Apache-2.0", TextLocation("file", 1))
 
-                    summary.licenseFindings shouldContainExactly listOf(
+                    summary.licenseFindings should containExactly(
                         LicenseFinding("Apache-2.0", TextLocation("submodules/file", 1))
                     )
                 }
@@ -117,11 +118,11 @@ private val scanResultRoot = ScanResult(
     provenance = provenanceRoot,
     scanner = scannerDetails,
     summary = ScanSummary.EMPTY.copy(
-        licenseFindings = sortedSetOf(
+        licenseFindings = setOf(
             LicenseFinding("Apache-2.0", TextLocation("file", 1)),
             LicenseFinding("Apache-2.0", TextLocation("submodules/file", 1))
         ),
-        copyrightFindings = sortedSetOf(
+        copyrightFindings = setOf(
             CopyrightFinding("Copyright", TextLocation("file", 1)),
             CopyrightFinding("Copyright", TextLocation("submodules/file", 1))
         )
@@ -132,11 +133,11 @@ private val scanResultSubmoduleA = ScanResult(
     provenance = provenanceSubmoduleA,
     scanner = scannerDetails,
     summary = ScanSummary.EMPTY.copy(
-        licenseFindings = sortedSetOf(
+        licenseFindings = setOf(
             LicenseFinding("Apache-2.0", TextLocation("fileA", 1)),
             LicenseFinding("Apache-2.0", TextLocation("dir/fileA", 1))
         ),
-        copyrightFindings = sortedSetOf(
+        copyrightFindings = setOf(
             CopyrightFinding("Copyright", TextLocation("fileA", 1)),
             CopyrightFinding("Copyright", TextLocation("dir/fileA", 1))
         )
@@ -147,11 +148,11 @@ private val scanResultSubmoduleB = ScanResult(
     provenance = provenanceSubmoduleA,
     scanner = scannerDetails,
     summary = ScanSummary.EMPTY.copy(
-        licenseFindings = sortedSetOf(
+        licenseFindings = setOf(
             LicenseFinding("Apache-2.0", TextLocation("fileB", 1)),
             LicenseFinding("Apache-2.0", TextLocation("dir/fileB", 1))
         ),
-        copyrightFindings = sortedSetOf(
+        copyrightFindings = setOf(
             CopyrightFinding("Copyright", TextLocation("fileB", 1)),
             CopyrightFinding("Copyright", TextLocation("dir/fileB", 1))
         )
@@ -167,4 +168,4 @@ private val nestedProvenanceScanResult = NestedProvenanceScanResult(
     )
 )
 
-private fun NestedProvenance.getRepositoryUrls() = getProvenances().map { (it as RepositoryProvenance).vcsInfo.url }
+private fun NestedProvenance.getRepositoryUrls() = allProvenances.map { (it as RepositoryProvenance).vcsInfo.url }

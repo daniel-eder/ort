@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,135 +19,227 @@
 
 package org.ossreviewtoolkit.analyzer
 
-import kotlin.time.measureTimedValue
+import org.apache.logging.log4j.kotlin.logger
 
-import org.apache.logging.log4j.kotlin.Logging
-
-import org.ossreviewtoolkit.analyzer.managers.utils.PackageManagerDependencyHandler
+import org.ossreviewtoolkit.downloader.VcsHost
 import org.ossreviewtoolkit.model.AnalyzerResult
-import org.ossreviewtoolkit.model.CuratedPackage
 import org.ossreviewtoolkit.model.DependencyGraph
 import org.ossreviewtoolkit.model.DependencyGraphNavigator
 import org.ossreviewtoolkit.model.Identifier
-import org.ossreviewtoolkit.model.OrtIssue
+import org.ossreviewtoolkit.model.Issue
 import org.ossreviewtoolkit.model.Package
 import org.ossreviewtoolkit.model.Project
 import org.ossreviewtoolkit.model.ProjectAnalyzerResult
+import org.ossreviewtoolkit.model.VcsInfo
+import org.ossreviewtoolkit.model.config.Excludes
+import org.ossreviewtoolkit.model.config.Includes
 import org.ossreviewtoolkit.model.createAndLogIssue
 import org.ossreviewtoolkit.model.utils.DependencyGraphBuilder
 import org.ossreviewtoolkit.model.utils.convertToDependencyGraph
+import org.ossreviewtoolkit.utils.common.getConflictingKeys
 import org.ossreviewtoolkit.utils.common.getDuplicates
 
-class AnalyzerResultBuilder(private val curationProvider: PackageCurationProvider = PackageCurationProvider.EMPTY) {
-    companion object : Logging
+class AnalyzerResultBuilder {
+    private val projects = mutableSetOf<Project>()
+    private val packages = mutableSetOf<Package>()
+    private val issues = mutableMapOf<Identifier, List<Issue>>()
+    private val dependencyGraphs = mutableMapOf<String, DependencyGraph>()
 
-    private val projects = sortedSetOf<Project>()
-    private val packages = sortedSetOf<CuratedPackage>()
-    private val issues = sortedMapOf<Identifier, List<OrtIssue>>()
-    private val dependencyGraphs = sortedMapOf<String, DependencyGraph>()
+    fun build(excludes: Excludes = Excludes.EMPTY, includes: Includes = Includes.EMPTY): AnalyzerResult {
+        val mergedPackages = packages.mergeSameWithDistinctValues()
 
-    fun build(): AnalyzerResult {
-        val duplicateIds = (projects.map { it.id } + packages.map { it.metadata.id }).getDuplicates()
-        require(duplicateIds.isEmpty()) {
-            "AnalyzerResult contains packages that are also projects. Duplicates: '$duplicateIds'."
+        val duplicates = (projects.map { it.toPackage() } + mergedPackages).getDuplicates { it.id }
+        require(duplicates.isEmpty()) {
+            "Unable to create the AnalyzerResult as it contains projects and / or packages with the same ids: " +
+                duplicates.values
         }
 
-        return AnalyzerResult(projects, packages, issues, dependencyGraphs)
-            .convertToDependencyGraph()
+        return AnalyzerResult(projects, mergedPackages, issues, dependencyGraphs)
+            .convertToDependencyGraph(excludes, includes)
             .resolvePackageManagerDependencies()
     }
 
-    fun addResult(projectAnalyzerResult: ProjectAnalyzerResult): AnalyzerResultBuilder {
-        // TODO: It might be, e.g. in the case of PIP "requirements.txt" projects, that different projects with
-        //       the same ID exist. We need to decide how to handle that case.
-        val existingProject = projects.find { it.id == projectAnalyzerResult.project.id }
+    fun addResult(projectAnalyzerResult: ProjectAnalyzerResult) =
+        apply {
+            // TODO: It might be, e.g. in the case of PIP "requirements.txt" projects, that different projects with
+            //       the same ID exist. Decide how to handle that case.
+            val existingProject = projects.find { it.id == projectAnalyzerResult.project.id }
 
-        if (existingProject != null) {
-            val existingDefinitionFileUrl = existingProject.let {
-                "${it.vcsProcessed.url}/${it.definitionFilePath}"
-            }
-            val incomingDefinitionFileUrl = projectAnalyzerResult.project.let {
-                "${it.vcsProcessed.url}/${it.definitionFilePath}"
-            }
+            if (existingProject != null) {
+                val existingDefinitionFileUrl = with(existingProject) {
+                    VcsHost.fromUrl(vcsProcessed.url)
+                        ?.toPermalink(vcsProcessed.copy(path = definitionFilePath))
+                        ?: "${vcsProcessed.url}/$definitionFilePath"
+                }
 
-            val issue = createAndLogIssue(
-                source = "analyzer",
-                message = "Multiple projects with the same id '${existingProject.id.toCoordinates()}' " +
+                val incomingDefinitionFileUrl = with(projectAnalyzerResult.project) {
+                    VcsHost.fromUrl(vcsProcessed.url)
+                        ?.toPermalink(vcsProcessed.copy(path = definitionFilePath))
+                        ?: "${vcsProcessed.url}/$definitionFilePath"
+                }
+
+                val issue = createAndLogIssue(
+                    source = "Analyzer",
+                    message = "Multiple projects with the same id '${existingProject.id.toCoordinates()}' " +
                         "found. Not adding the project defined in '$incomingDefinitionFileUrl' to the " +
                         "analyzer results as it duplicates the project defined in " +
                         "'$existingDefinitionFileUrl'."
-            )
+                )
 
-            val projectIssues = issues.getOrDefault(existingProject.id, emptyList())
-            issues[existingProject.id] = projectIssues + issue
-        } else {
-            projects += projectAnalyzerResult.project
-            addPackages(projectAnalyzerResult.packages)
+                val projectIssues = issues.getOrDefault(existingProject.id, emptyList())
+                issues[existingProject.id] = projectIssues + issue
+            } else {
+                addProject(projectAnalyzerResult.project)
+                addPackages(projectAnalyzerResult.packages)
 
-            if (projectAnalyzerResult.issues.isNotEmpty()) {
-                issues[projectAnalyzerResult.project.id] = projectAnalyzerResult.issues
+                if (projectAnalyzerResult.issues.isNotEmpty()) {
+                    issues[projectAnalyzerResult.project.id] = projectAnalyzerResult.issues
+                }
             }
         }
 
-        return this
-    }
+    /**
+     * Add the given [project] to this builder. This function can be used for projects that have been obtained
+     * independently of a [ProjectAnalyzerResult].
+     */
+    fun addProject(project: Project) = apply { projects += project }
 
     /**
      * Add the given [packageSet] to this builder. This function can be used for packages that have been obtained
      * independently of a [ProjectAnalyzerResult].
      */
-    fun addPackages(packageSet: Set<Package>): AnalyzerResultBuilder {
-        val (curations, duration) = measureTimedValue { curationProvider.getCurationsFor(packageSet.map { it.id }) }
-
-        logger.info { "Getting package curations took $duration." }
-
-        packages += packageSet.map { pkg ->
-            curations[pkg.id].orEmpty().fold(pkg.toCuratedPackage()) { cur, packageCuration ->
-                logger.debug {
-                    "Applying curation '$packageCuration' to package '${pkg.id.toCoordinates()}'."
-                }
-
-                packageCuration.apply(cur)
-            }
-        }
-
-        return this
-    }
+    fun addPackages(packageSet: Set<Package>) = apply { packages += packageSet }
 
     /**
      * Add a [DependencyGraph][graph] with all dependencies detected by the [PackageManager] with the given
      * [name][packageManagerName] to the result produced by this builder.
      */
-    fun addDependencyGraph(packageManagerName: String, graph: DependencyGraph): AnalyzerResultBuilder {
-        dependencyGraphs[packageManagerName] = graph
-        return this
-    }
+    fun addDependencyGraph(packageManagerName: String, graph: DependencyGraph) =
+        apply { dependencyGraphs[packageManagerName] = graph }
 }
 
 private fun AnalyzerResult.resolvePackageManagerDependencies(): AnalyzerResult {
-    if (dependencyGraphs.isEmpty()) return this
+    if (dependencyGraphs.size < 2) return this
 
     val handler = PackageManagerDependencyHandler(this)
     val navigator = DependencyGraphNavigator(dependencyGraphs)
 
-    val graphs = projects.groupBy { it.id.type }.entries.associate { (type, projectsForType) ->
+    // Exit early if no graph contains placeholder nodes for package manager dependencies to avoid expensive graph
+    // reconstruction in those regular cases.
+    val hasPackageManagerDependencies = dependencyGraphs.any { (packageManagerName, graph) ->
+        graph.scopes.any { (_, rootIndices) ->
+            val nodes = navigator.dependenciesAccessor(packageManagerName, graph, rootIndices)
+            nodes.any { it.isPackageManagerDependency }
+        }
+    }
+
+    if (!hasPackageManagerDependencies) return this
+
+    logger.info { "Resolving package manager dependencies across ${dependencyGraphs.size} graphs." }
+
+    // Resolve package manager dependencies by constructing new graphs that have the placeholder nodes replaced with
+    // copies of the referenced nodes.
+    val graphs = dependencyGraphs.mapValues { (packageManagerName, graph) ->
         val builder = DependencyGraphBuilder(handler)
 
-        projectsForType.forEach { project ->
-            project.scopeNames?.forEach { scopeName ->
-                val qualifiedScopeName = DependencyGraph.qualifyScope(project, scopeName)
-                navigator.directDependencies(project, scopeName).forEach { node ->
-                    handler.resolvePackageManagerDependency(node).forEach {
-                        builder.addDependency(qualifiedScopeName, it)
-                    }
-                }
+        logger.info { "Resolving dependencies for $packageManagerName across ${graph.scopes.size} scope(s)." }
+
+        graph.scopes.forEach { (scopeName, rootIndices) ->
+            val nodes = navigator.dependenciesAccessor(packageManagerName, graph, rootIndices)
+            val resolvableNodes = nodes.flatMap { node ->
+                handler.resolvePackageManagerDependency(node)
+            }
+
+            resolvableNodes.forEach { node ->
+                // TODO: Adding a dependency internally calls `areDependenciesEqual()`, but the implementation from
+                //       `PackageManagerDependencyHandler` and not any package-manager-specific override, meaning that
+                //       optimizations done there are lost here. Ideally, this would be solved by changing the whole
+                //       algorithm to not reconstruct the graph by copying all nodes, but by only replacing the
+                //       placeholder nodes for package manager dependencies with references to the respective graphs.
+                builder.addDependency(scopeName, node)
             }
         }
 
-        // Package managers that do not use the dependency graph representation, might not have a check implemented to
-        // verify that packages exist for all dependencies, so we need to disable the reference check here.
-        type to builder.build(checkReferences = false)
+        // Package managers that do not use the dependency graph representation might not have a check implemented to
+        // verify that packages exist for all dependencies, so the reference check needs to be disabled here.
+        builder.build(checkReferences = false)
     }
 
     return copy(dependencyGraphs = graphs)
+}
+
+/**
+ * Merge packages with the same ID, PURL, and CPE into a single package if all these packages exclusively have distinct
+ * values for their properties. Two properties are handled specially: VCS information is normalized before being checked
+ * for distinct values, and labels are merged unless they have conflicting keys. If packages cannot be merged this way,
+ * the original packages are returned. Similar for unique packages, which are returned as-is without any normalization.
+ */
+internal fun Collection<Package>.mergeSameWithDistinctValues(): Set<Package> =
+    groupBy { it.id to it.purl to it.cpe }.values.flatMapTo(mutableSetOf()) { samePackages ->
+        val referencePkg = samePackages.first()
+        if (samePackages.size == 1) return@flatMapTo listOf(referencePkg)
+
+        val normalizedVcsInfo = samePackages.map { it.vcs.normalize() }
+        val processedVcsInfo = samePackages.map { it.vcsProcessed }
+
+        runCatching {
+            Package(
+                id = referencePkg.id,
+                purl = referencePkg.purl,
+                cpe = referencePkg.cpe,
+                authors = distinctValueOf(samePackages) { it.authors },
+                declaredLicenses = distinctValueOf(samePackages) { it.declaredLicenses },
+                declaredLicensesProcessed = distinctValueOf(samePackages) { it.declaredLicensesProcessed },
+                concludedLicense = distinctValueOf(samePackages) { it.concludedLicense },
+                description = distinctValueOf(samePackages) { it.description },
+                homepageUrl = distinctValueOf(samePackages) { it.homepageUrl },
+                binaryArtifact = distinctValueOf(samePackages) { it.binaryArtifact },
+                sourceArtifact = distinctValueOf(samePackages) { it.sourceArtifact },
+                publishedAt = distinctValueOf(samePackages) { it.publishedAt },
+                vcs = VcsInfo(
+                    type = distinctValueOf(normalizedVcsInfo) { it.type },
+                    url = distinctValueOf(normalizedVcsInfo) { it.url },
+                    revision = distinctValueOf(normalizedVcsInfo) { it.revision },
+                    path = distinctValueOf(normalizedVcsInfo) { it.path }
+                ),
+                vcsProcessed = VcsInfo(
+                    type = distinctValueOf(processedVcsInfo) { it.type },
+                    url = distinctValueOf(processedVcsInfo) { it.url },
+                    revision = distinctValueOf(processedVcsInfo) { it.revision },
+                    path = distinctValueOf(processedVcsInfo) { it.path }
+                ),
+                isMetadataOnly = distinctValueOf(samePackages) { it.isMetadataOnly },
+                isModified = distinctValueOf(samePackages) { it.isModified },
+                sourceCodeOrigins = distinctValueOf(samePackages) { it.sourceCodeOrigins },
+                labels = samePackages.fold(emptyMap()) { acc, pkg ->
+                    acc.getConflictingKeys(pkg.labels).let { conflictingKeys ->
+                        require(conflictingKeys.isEmpty()) {
+                            "Cannot merge labels for ${samePackages.size} packages with the same ID " +
+                                "'${pkg.id.toCoordinates()}' because of conflicting keys: $conflictingKeys"
+                        }
+
+                        acc + pkg.labels
+                    }
+                }
+            ).let { listOf(it) }
+        }.getOrDefault(samePackages)
+    }
+
+private inline fun <reified T, R> distinctValueOf(entries: Collection<T>, selector: (T) -> R): R {
+    val emptyValue = selector(T::class.java.getField("EMPTY").get(null) as T)
+    val distinctNonEmptyValues = entries
+        .map(selector)
+        .distinct()
+        .filterNot { it == emptyValue }
+
+    return when (distinctNonEmptyValues.size) {
+        0 -> emptyValue
+
+        1 -> distinctNonEmptyValues.first()
+
+        else -> error(
+            "Cannot merge the selected property for ${entries.size} entries of type ${T::class.java.simpleName} " +
+                "because ${distinctNonEmptyValues.size} distinct values have been found: $distinctNonEmptyValues"
+        )
+    }
 }

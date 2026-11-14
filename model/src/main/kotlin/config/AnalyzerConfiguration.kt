@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,8 +19,18 @@
 
 package org.ossreviewtoolkit.model.config
 
+import com.fasterxml.jackson.annotation.JsonAlias
 import com.fasterxml.jackson.annotation.JsonInclude
 
+import com.sksamuel.hoplite.ConfigAlias
+
+import org.ossreviewtoolkit.utils.common.zip
+
+/**
+ * The configuration model of the analyzer. This class is (de-)serialized in the following places:
+ * - Deserialized from "config.yml" as part of [OrtConfiguration] (via Hoplite).
+ * - (De-)Serialized as part of [org.ossreviewtoolkit.model.OrtResult] (via Jackson).
+ */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class AnalyzerConfiguration(
     /**
@@ -33,40 +43,65 @@ data class AnalyzerConfiguration(
     val allowDynamicVersions: Boolean = false,
 
     /**
-     * A list of the case-insensitive names of package managers that are enabled. Disabling a package manager in
+     * A list of the case-insensitive IDs of package manager plugins that are enabled. Disabling a package manager in
      * [disabledPackageManagers] overrides enabling it here.
      */
-    val enabledPackageManagers: List<String>? = null,
+    val enabledPackageManagers: List<String> = listOf(
+        "Bazel",
+        "Bower",
+        "Bun",
+        "Bundler",
+        "Cargo",
+        "Carthage",
+        "CocoaPods",
+        "Composer",
+        "Conan",
+        "GitHubAction",
+        "Gleam",
+        "GoMod",
+        "GradleInspector",
+        "Maven",
+        "Mix",
+        "NPM",
+        "NuGet",
+        "OrtProjectFile",
+        "PIP",
+        "Pipenv",
+        "PNPM",
+        "Poetry",
+        "Pub",
+        "Rebar3",
+        "SBT",
+        "SpdxDocumentFile",
+        "Stack",
+        "SwiftPM",
+        "Tycho",
+        "Unmanaged",
+        "Yarn",
+        "Yarn2"
+    ),
 
     /**
-     * A list of the case-insensitive names of package managers that are disabled. Disabling a package manager in this
-     * list overrides [enabledPackageManagers].
+     * A list of the case-insensitive IDs of package manager plugins that are disabled. Disabling a package manager in
+     * this list overrides [enabledPackageManagers].
      */
     val disabledPackageManagers: List<String>? = null,
 
     /**
-     * Package manager specific configurations. The key needs to match the name of the package manager class, e.g.
+     * Package manager specific configurations. The key needs to match the ID of the package manager plugin, e.g.
      * "NuGet" for the NuGet package manager.
      */
+    @ConfigAlias("analyzers")
+    @JsonAlias("analyzers")
     val packageManagers: Map<String, PackageManagerConfiguration>? = null,
 
-    /**
-     * Configuration of the SW360 package curation provider.
-     */
-    val sw360Configuration: Sw360StorageConfiguration? = null
+    /** A flag to control whether excluded scopes and paths should be skipped during the analysis. */
+    val skipExcluded: Boolean = false
 ) {
-    /**
-     * A copy of [packageManagers] with case-insensitive keys.
-     */
-    private val packageManagersCaseInsensitive: Map<String, PackageManagerConfiguration>? =
-        packageManagers?.toSortedMap(String.CASE_INSENSITIVE_ORDER)
-
-    init {
-        val duplicatePackageManagers =
-            packageManagers?.keys.orEmpty() - packageManagersCaseInsensitive?.keys?.toSet().orEmpty()
-
-        require(duplicatePackageManagers.isEmpty()) {
-            "The following package managers have duplicate configuration: ${duplicatePackageManagers.joinToString()}."
+    /** A copy of [packageManagers] with case-insensitive keys. */
+    private val packageManagersCaseInsensitive = packageManagers?.let {
+        sortedMapOf<String, PackageManagerConfiguration>(String.CASE_INSENSITIVE_ORDER).zip(it) { a, b ->
+            a.merge(b)
         }
     }
 
@@ -76,24 +111,24 @@ data class AnalyzerConfiguration(
      */
     fun getPackageManagerConfiguration(packageManager: String) = packageManagersCaseInsensitive?.get(packageManager)
 
-    /**
-     * Merge this [AnalyzerConfiguration] with [other]. Values of [other] take precedence.
-     */
-    fun merge(other: AnalyzerConfiguration): AnalyzerConfiguration {
+    /** Merge this [AnalyzerConfiguration] with [override]. Values of [override] take precedence. */
+    fun merge(override: RepositoryAnalyzerConfiguration): AnalyzerConfiguration {
         val mergedPackageManagers = when {
-            packageManagers == null -> other.packageManagers
-            other.packageManagers == null -> packageManagers
+            packageManagers == null -> override.packageManagers
+
+            override.packageManagers == null -> packageManagers
+
             else -> {
                 val keys = sortedSetOf(String.CASE_INSENSITIVE_ORDER).apply {
                     addAll(packageManagers.keys)
-                    addAll(other.packageManagers.keys)
+                    addAll(override.packageManagers.keys)
                 }
 
                 val result = sortedMapOf<String, PackageManagerConfiguration>(String.CASE_INSENSITIVE_ORDER)
 
                 keys.forEach { key ->
                     val configSelf = getPackageManagerConfiguration(key)
-                    val configOther = other.getPackageManagerConfiguration(key)
+                    val configOther = override.getPackageManagerConfiguration(key)
 
                     result[key] = when {
                         configSelf == null -> configOther
@@ -107,11 +142,20 @@ data class AnalyzerConfiguration(
         }
 
         return AnalyzerConfiguration(
-            allowDynamicVersions = other.allowDynamicVersions,
-            enabledPackageManagers = other.enabledPackageManagers ?: enabledPackageManagers,
-            disabledPackageManagers = other.disabledPackageManagers ?: disabledPackageManagers,
+            allowDynamicVersions = override.allowDynamicVersions ?: allowDynamicVersions,
+            enabledPackageManagers = override.enabledPackageManagers ?: enabledPackageManagers,
+            disabledPackageManagers = override.disabledPackageManagers ?: disabledPackageManagers,
             packageManagers = mergedPackageManagers,
-            sw360Configuration = other.sw360Configuration ?: sw360Configuration
+            skipExcluded = override.skipExcluded ?: skipExcluded
         )
+    }
+
+    /**
+     * Return a copy of this [AnalyzerConfiguration] "patched" with [name]-specific options to contain the given [key]
+     * and [value] pair, overriding any existing entry.
+     */
+    fun withPackageManagerOption(name: String, key: String, value: String): AnalyzerConfiguration {
+        val override = mapOf(name to PackageManagerConfiguration(options = mapOf(key to value)))
+        return copy(packageManagers = packageManagersCaseInsensitive.orEmpty().zip(override) { a, b -> a.merge(b) })
     }
 }

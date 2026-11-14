@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,9 +20,13 @@
 package org.ossreviewtoolkit.downloader
 
 import io.kotest.assertions.throwables.shouldThrow
-import io.kotest.core.spec.style.StringSpec
-import io.kotest.core.test.TestCase
+import io.kotest.core.annotation.Tags
+import io.kotest.core.spec.style.WordSpec
+import io.kotest.engine.spec.tempdir
+import io.kotest.matchers.collections.shouldContainExactly
+import io.kotest.matchers.file.aDirectory
 import io.kotest.matchers.file.aFile
+import io.kotest.matchers.nulls.shouldNotBeNull
 import io.kotest.matchers.should
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.string.endWith
@@ -42,18 +46,119 @@ import org.ossreviewtoolkit.model.VcsInfo
 import org.ossreviewtoolkit.model.VcsType
 import org.ossreviewtoolkit.model.config.DownloaderConfiguration
 import org.ossreviewtoolkit.utils.common.VCS_DIRECTORIES
-import org.ossreviewtoolkit.utils.test.ExpensiveTag
-import org.ossreviewtoolkit.utils.test.createTestTempDir
+import org.ossreviewtoolkit.utils.common.div
+import org.ossreviewtoolkit.utils.ort.normalizeVcsUrl
 
-class DownloaderFunTest : StringSpec() {
-    private lateinit var outputDir: File
+@Tags("RequiresExternalTool")
+class DownloaderFunTest : WordSpec({
+    lateinit var outputDir: File
 
-    override suspend fun beforeTest(testCase: TestCase) {
-        outputDir = createTestTempDir()
+    beforeTest {
+        outputDir = tempdir()
     }
 
-    init {
-        "Downloads and unpacks JAR source package".config(tags = setOf(ExpensiveTag)) {
+    "A source artifact download" should {
+        "succeed for ZIP archives from GitHub" {
+            val artifactUrl = "https://github.com/microsoft/tslib/archive/1.10.0.zip"
+            val pkg = Package(
+                id = Identifier(
+                    type = "NPM",
+                    namespace = "",
+                    name = "tslib",
+                    version = "1.10.0"
+                ),
+                declaredLicenses = emptySet(),
+                description = "",
+                homepageUrl = "",
+                binaryArtifact = RemoteArtifact.EMPTY,
+                sourceArtifact = RemoteArtifact(
+                    url = artifactUrl,
+                    hash = Hash.create("7f7994408f130dd138a59a625eeef3be1ab40f7b")
+                ),
+                vcs = VcsInfo.EMPTY
+            )
+
+            val provenance = Downloader(DownloaderConfiguration()).download(pkg, outputDir)
+            val tslibDir = outputDir / "tslib-1.10.0"
+
+            with(provenance.shouldBeTypeOf<ArtifactProvenance>()) {
+                sourceArtifact.url shouldBe pkg.sourceArtifact.url
+                sourceArtifact.hash shouldBe pkg.sourceArtifact.hash
+            }
+
+            tslibDir.isDirectory shouldBe true
+            tslibDir.walk().count() shouldBe 16
+        }
+
+        "succeed for TGZ archives from SourceForge" {
+            val artifactUrl = "https://master.dl.sourceforge.net/project/tyrex/tyrex/Tyrex%201.0.1/tyrex-1.0.1-src.tgz"
+            val pkg = Package(
+                id = Identifier(
+                    type = "Maven",
+                    namespace = "tyrex",
+                    name = "tyrex",
+                    version = "1.0.1"
+                ),
+                declaredLicenses = emptySet(),
+                description = "",
+                homepageUrl = "",
+                binaryArtifact = RemoteArtifact.EMPTY,
+                sourceArtifact = RemoteArtifact(
+                    url = artifactUrl,
+                    hash = Hash.create("49fe486f44197c8e5106ed7487526f77b597308f")
+                ),
+                vcs = VcsInfo.EMPTY
+            )
+
+            val provenance = Downloader(DownloaderConfiguration()).download(pkg, outputDir)
+            val tyrexDir = outputDir / "tyrex-1.0.1"
+
+            provenance.shouldBeTypeOf<ArtifactProvenance>().apply {
+                sourceArtifact.url shouldBe pkg.sourceArtifact.url
+                sourceArtifact.hash shouldBe pkg.sourceArtifact.hash
+            }
+
+            tyrexDir.isDirectory shouldBe true
+            tyrexDir.walk().count() shouldBe 409
+        }
+
+        "succeed for Hex packages and extract nested contents" {
+            val artifactUrl = "https://repo.hex.pm/tarballs/filepath-1.1.2.tar"
+            val pkg = Package(
+                id = Identifier(
+                    type = "Hex",
+                    namespace = "",
+                    name = "filepath",
+                    version = "1.1.2"
+                ),
+                declaredLicenses = emptySet(),
+                description = "",
+                homepageUrl = "",
+                binaryArtifact = RemoteArtifact.EMPTY,
+                sourceArtifact = RemoteArtifact(
+                    url = artifactUrl,
+                    hash = Hash.create("b0a3762cde6dcdc4f066842d5e5c67a1b9f717f5")
+                ),
+                vcs = VcsInfo.EMPTY
+            )
+
+            val provenance = Downloader(DownloaderConfiguration()).download(pkg, outputDir)
+
+            provenance.shouldBeTypeOf<ArtifactProvenance>().apply {
+                sourceArtifact.url shouldBe pkg.sourceArtifact.url
+                sourceArtifact.hash shouldBe pkg.sourceArtifact.hash
+            }
+
+            // Verify that the nested contents.tar.gz was extracted, not just the outer tar.
+            // The gleam.toml file is inside contents.tar.gz.
+            val gleamToml = outputDir / "gleam.toml"
+            gleamToml shouldBe aFile()
+
+            val srcDir = outputDir / "src"
+            srcDir shouldBe aDirectory()
+        }
+
+        "succeed for sources JAR artifacts" {
             val pkg = Package(
                 id = Identifier(
                     type = "Maven",
@@ -61,7 +166,7 @@ class DownloaderFunTest : StringSpec() {
                     name = "junit",
                     version = "4.12"
                 ),
-                declaredLicenses = sortedSetOf(),
+                declaredLicenses = emptySet(),
                 description = "",
                 homepageUrl = "",
                 binaryArtifact = RemoteArtifact.EMPTY,
@@ -73,7 +178,7 @@ class DownloaderFunTest : StringSpec() {
             )
 
             val provenance = Downloader(DownloaderConfiguration()).download(pkg, outputDir)
-            val licenseFile = outputDir.resolve("LICENSE-junit.txt")
+            val licenseFile = outputDir / "LICENSE-junit.txt"
 
             provenance.shouldBeTypeOf<ArtifactProvenance>().apply {
                 sourceArtifact.url shouldBe pkg.sourceArtifact.url
@@ -90,7 +195,7 @@ class DownloaderFunTest : StringSpec() {
             outputDir.walk().count() shouldBe 234
         }
 
-        "Download of JAR source package fails when hash is incorrect".config(tags = setOf(ExpensiveTag)) {
+        "fail for sources JAR artifacts with an incorrect hash" {
             val pkg = Package(
                 id = Identifier(
                     type = "Maven",
@@ -98,7 +203,7 @@ class DownloaderFunTest : StringSpec() {
                     name = "junit",
                     version = "4.12"
                 ),
-                declaredLicenses = sortedSetOf(),
+                declaredLicenses = emptySet(),
                 description = "",
                 homepageUrl = "",
                 binaryArtifact = RemoteArtifact.EMPTY,
@@ -113,15 +218,16 @@ class DownloaderFunTest : StringSpec() {
                 Downloader(DownloaderConfiguration()).download(pkg, outputDir)
             }
 
-            exception.suppressed.size shouldBe 2
-            exception.suppressed[0]!!.message shouldBe "No VCS URL provided for 'Maven:junit:junit:4.12'. " +
+            exception.suppressed.map { it.message }.shouldContainExactly(
+                "No VCS URL provided for 'Maven:junit:junit:4.12'. " +
                     "Please define the \"connection\" tag within the \"scm\" tag in the POM file, " +
-                    "see: https://maven.apache.org/pom.html#SCM"
-            exception.suppressed[1]!!.message shouldBe "Source artifact does not match expected " +
+                    "see: https://maven.apache.org/pom.html#SCM",
+                "Source artifact does not match expected " +
                     "Hash(value=0123456789abcdef0123456789abcdef01234567, algorithm=SHA-1)."
+            )
         }
 
-        "Falls back to downloading source package when download from VCS fails".config(tags = setOf(ExpensiveTag)) {
+        "should be tried as a fallback when the download from VCS fails" {
             val downloaderConfiguration = DownloaderConfiguration(
                 sourceCodeOrigins = listOf(SourceCodeOrigin.VCS, SourceCodeOrigin.ARTIFACT)
             )
@@ -133,7 +239,7 @@ class DownloaderFunTest : StringSpec() {
                     name = "junit",
                     version = "4.12"
                 ),
-                declaredLicenses = sortedSetOf(),
+                declaredLicenses = emptySet(),
                 description = "",
                 homepageUrl = "",
                 binaryArtifact = RemoteArtifact.EMPTY,
@@ -149,9 +255,9 @@ class DownloaderFunTest : StringSpec() {
             )
 
             val provenance = Downloader(downloaderConfiguration).download(pkg, outputDir)
-            val licenseFile = outputDir.resolve("LICENSE-junit.txt")
+            val licenseFile = outputDir / "LICENSE-junit.txt"
 
-            provenance.shouldBeTypeOf<ArtifactProvenance>().apply {
+            with(provenance.shouldBeTypeOf<ArtifactProvenance>()) {
                 sourceArtifact.url shouldBe pkg.sourceArtifact.url
                 sourceArtifact.hash shouldBe pkg.sourceArtifact.hash
             }
@@ -165,8 +271,94 @@ class DownloaderFunTest : StringSpec() {
 
             outputDir.walk().count() shouldBe 234
         }
+    }
 
-        "Falls back to downloading from VCS when source package download fails".config(tags = setOf(ExpensiveTag)) {
+    "A VCS download" should {
+        "succeed for the Babel project hosted in Git" {
+            val vcsFromPackage = VcsInfo(
+                type = VcsType.GIT,
+                url = "https://github.com/babel/babel/tree/master/packages/babel-cli",
+                revision = ""
+            )
+            val vcsFromUrl = VcsHost.parseUrl(normalizeVcsUrl(vcsFromPackage.url))
+            val vcsMerged = vcsFromUrl.merge(vcsFromPackage)
+
+            val pkg = Package(
+                id = Identifier(
+                    type = "NPM",
+                    namespace = "",
+                    name = "babel-cli",
+                    version = "6.26.0"
+                ),
+                declaredLicenses = setOf("MIT"),
+                description = "Babel command line.",
+                homepageUrl = "https://babeljs.io/",
+                binaryArtifact = RemoteArtifact(
+                    url = "https://registry.npmjs.org/babel-cli/-/babel-cli-6.26.0.tgz",
+                    hash = Hash.create("502ab54874d7db88ad00b887a06383ce03d002f1")
+                ),
+                sourceArtifact = RemoteArtifact.EMPTY,
+                vcs = vcsFromPackage,
+                vcsProcessed = vcsMerged
+            )
+
+            val provenance = Downloader(DownloaderConfiguration()).download(pkg, outputDir)
+            val workingTree = VersionControlSystem.forDirectory(outputDir)
+            val babelCliDir = outputDir / "packages" / "babel-cli"
+
+            with(provenance.shouldBeTypeOf<RepositoryProvenance>()) {
+                vcsInfo.type shouldBe pkg.vcsProcessed.type
+                vcsInfo.url shouldBe pkg.vcsProcessed.url
+                vcsInfo.revision shouldBe "master"
+                vcsInfo.path shouldBe pkg.vcsProcessed.path
+                resolvedRevision shouldBe "cee4cde53e4f452d89229986b9368ecdb41e00da"
+            }
+
+            workingTree shouldNotBeNull {
+                isValid() shouldBe true
+                getRevision() shouldBe "cee4cde53e4f452d89229986b9368ecdb41e00da"
+            }
+
+            babelCliDir.isDirectory shouldBe true
+            babelCliDir.walk().count() shouldBe 242
+        }
+
+        "succeed for the BeanUtils project hosted in Subversion" {
+            val vcsFromCuration = VcsInfo(
+                type = VcsType.SUBVERSION,
+                url = "https://svn.apache.org/repos/asf/commons/_moved_to_git/beanutils",
+                revision = ""
+            )
+
+            val pkg = Package(
+                id = Identifier(
+                    type = "Maven",
+                    namespace = "commons-beanutils",
+                    name = "commons-beanutils-bean-collections",
+                    version = "1.8.3"
+                ),
+                declaredLicenses = setOf("The Apache Software License, Version 2.0"),
+                description = "",
+                homepageUrl = "http://commons.apache.org/beanutils/",
+                binaryArtifact = RemoteArtifact.EMPTY,
+                sourceArtifact = RemoteArtifact.EMPTY,
+                vcs = vcsFromCuration
+            )
+
+            val provenance = Downloader(DownloaderConfiguration()).download(pkg, outputDir)
+
+            outputDir.walk().onEnter { it.name !in VCS_DIRECTORIES }.count() shouldBe 302
+
+            with(provenance.shouldBeTypeOf<RepositoryProvenance>()) {
+                vcsInfo.type shouldBe VcsType.SUBVERSION
+                vcsInfo.url shouldBe vcsFromCuration.url
+                vcsInfo.revision shouldBe ""
+                vcsInfo.path shouldBe vcsFromCuration.path
+                resolvedRevision shouldBe "928490"
+            }
+        }
+
+        "be tried as a fallback when the source artifact download fails" {
             val downloaderConfiguration = DownloaderConfiguration(
                 sourceCodeOrigins = listOf(SourceCodeOrigin.ARTIFACT, SourceCodeOrigin.VCS)
             )
@@ -178,7 +370,7 @@ class DownloaderFunTest : StringSpec() {
                     name = "junit",
                     version = "4.12"
                 ),
-                declaredLicenses = sortedSetOf(),
+                declaredLicenses = emptySet(),
                 description = "",
                 homepageUrl = "",
                 binaryArtifact = RemoteArtifact.EMPTY,
@@ -194,9 +386,9 @@ class DownloaderFunTest : StringSpec() {
             )
 
             val provenance = Downloader(downloaderConfiguration).download(pkg, outputDir)
-            val licenseFile = outputDir.resolve("LICENSE-junit.txt")
+            val licenseFile = outputDir / "LICENSE-junit.txt"
 
-            provenance.shouldBeTypeOf<RepositoryProvenance>().apply {
+            with(provenance.shouldBeTypeOf<RepositoryProvenance>()) {
                 vcsInfo.url shouldBe pkg.vcs.url
                 vcsInfo.revision shouldBe pkg.vcs.revision
             }
@@ -210,69 +402,5 @@ class DownloaderFunTest : StringSpec() {
 
             outputDir.walk().onEnter { it.name !in VCS_DIRECTORIES }.count() shouldBe 588
         }
-
-        "Can download a TGZ source artifact from SourceForge".config(tags = setOf(ExpensiveTag)) {
-            val artifactUrl = "https://master.dl.sourceforge.net/project/tyrex/tyrex/Tyrex%201.0.1/tyrex-1.0.1-src.tgz"
-            val pkg = Package(
-                id = Identifier(
-                    type = "Maven",
-                    namespace = "tyrex",
-                    name = "tyrex",
-                    version = "1.0.1"
-                ),
-                declaredLicenses = sortedSetOf(),
-                description = "",
-                homepageUrl = "",
-                binaryArtifact = RemoteArtifact.EMPTY,
-                sourceArtifact = RemoteArtifact(
-                    url = artifactUrl,
-                    hash = Hash.create("49fe486f44197c8e5106ed7487526f77b597308f")
-                ),
-                vcs = VcsInfo.EMPTY
-            )
-
-            val provenance = Downloader(DownloaderConfiguration()).download(pkg, outputDir)
-            val tyrexDir = outputDir.resolve("tyrex-1.0.1")
-
-            provenance.shouldBeTypeOf<ArtifactProvenance>().apply {
-                sourceArtifact.url shouldBe pkg.sourceArtifact.url
-                sourceArtifact.hash shouldBe pkg.sourceArtifact.hash
-            }
-
-            tyrexDir.isDirectory shouldBe true
-            tyrexDir.walk().count() shouldBe 409
-        }
-
-        "Can download a ZIP source artifact from GitHub".config(tags = setOf(ExpensiveTag)) {
-            val artifactUrl = "https://github.com/microsoft/tslib/archive/1.10.0.zip"
-            val pkg = Package(
-                id = Identifier(
-                    type = "NPM",
-                    namespace = "",
-                    name = "tslib",
-                    version = "1.10.0"
-                ),
-                declaredLicenses = sortedSetOf(),
-                description = "",
-                homepageUrl = "",
-                binaryArtifact = RemoteArtifact.EMPTY,
-                sourceArtifact = RemoteArtifact(
-                    url = artifactUrl,
-                    hash = Hash.create("7f7994408f130dd138a59a625eeef3be1ab40f7b")
-                ),
-                vcs = VcsInfo.EMPTY
-            )
-
-            val provenance = Downloader(DownloaderConfiguration()).download(pkg, outputDir)
-            val tslibDir = outputDir.resolve("tslib-1.10.0")
-
-            provenance.shouldBeTypeOf<ArtifactProvenance>().apply {
-                sourceArtifact.url shouldBe pkg.sourceArtifact.url
-                sourceArtifact.hash shouldBe pkg.sourceArtifact.hash
-            }
-
-            tslibDir.isDirectory shouldBe true
-            tslibDir.walk().count() shouldBe 16
-        }
     }
-}
+})

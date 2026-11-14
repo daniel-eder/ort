@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,37 +17,46 @@
  * License-Filename: LICENSE
  */
 
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
+import de.undercouch.gradle.tasks.download.Download
 
 plugins {
     // Apply core plugins.
-    `java-library`
+    `java-test-fixtures`
+
+    // Apply precompiled plugins.
+    id("ort-library-conventions")
 
     // Apply third-party plugins.
+    alias(libs.plugins.download)
     alias(libs.plugins.kotlinSerialization)
 }
 
 dependencies {
-    api(project(":model"))
-    api(project(":utils:scripting-utils"))
+    api(projects.model)
+    api(projects.utils.scriptUtils)
+    api(projects.utils.spdxExpressionUtils)
+    api(libs.kotlinx.serialization.core)
 
-    implementation(project(":downloader"))
-    implementation(project(":utils:ort-utils"))
-    implementation(project(":utils:spdx-utils"))
-
-    implementation("org.jetbrains.kotlin:kotlin-scripting-common")
+    implementation(projects.downloader)
+    implementation(projects.utils.commonUtils)
+    implementation(projects.utils.ortUtils)
+    implementation(projects.utils.spdxUtils)
     implementation("org.jetbrains.kotlin:kotlin-scripting-jvm-host")
-    implementation(libs.kotlinxSerialization)
+    implementation(libs.kotlinx.serialization.json)
 
+    testFixturesImplementation(projects.utils.testUtils)
+    testFixturesImplementation(libs.kotlinx.serialization.core)
+
+    testImplementation(projects.utils.testUtils)
     testImplementation(libs.mockk)
+
+    kotlinScriptDef(projects.utils.scriptUtils)
 }
 
-tasks.withType<KotlinCompile>().configureEach {
-    val customCompilerArgs = listOf(
-        "-opt-in=kotlinx.serialization.ExperimentalSerializationApi"
-    )
+tasks.register<Download>("updateOsadlMatrix") {
+    description = "Download the OSADL matrix in JSON format and add it as a resource."
+    group = "OSADL"
 
-    kotlinOptions {
-        freeCompilerArgs = freeCompilerArgs + customCompilerArgs
-    }
+    src("https://www.osadl.org/fileadmin/checklists/matrixseqexpl.json")
+    dest("src/main/resources/rules/matrixseqexpl.json")
 }

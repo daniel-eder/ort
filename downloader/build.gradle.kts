@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,26 +18,20 @@
  */
 
 plugins {
-    // Apply core plugins.
-    `java-library`
+    // Apply precompiled plugins.
+    id("ort-library-conventions")
 }
 
 dependencies {
-    api(project(":model"))
+    api(projects.model)
+    api(projects.plugins.api)
+    api(libs.kotlinx.coroutines)
 
-    implementation(project(":utils:ort-utils"))
+    implementation(projects.utils.commonUtils)
+    implementation(projects.utils.ortUtils)
+    implementation(libs.tika)
 
-    // Force the generated Maven POM to use the same version of "jsch" Gradle resolves the version conflict to.
-    implementation("com.jcraft:jsch") {
-        version {
-            strictly("0.1.55")
-        }
-    }
-
-    implementation(libs.jgit)
-    implementation(libs.jgitJsch)
-    implementation(libs.jschAgentProxy)
-    implementation(libs.svnkit)
+    funTestImplementation(platform(projects.plugins.versionControlSystems))
 
     testImplementation(libs.mockk)
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2022 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,107 +19,130 @@
 
 package org.ossreviewtoolkit.clients.osv
 
-import java.io.IOException
-import java.util.concurrent.ConcurrentLinkedQueue
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.atomic.AtomicReference
+import io.ks3.java.typealiases.InstantAsString
 
+import java.util.concurrent.Executors
+
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNamingStrategy
+
+import okhttp3.Dispatcher
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 
-import retrofit2.Call
-import retrofit2.Callback
-import retrofit2.Response
+import retrofit2.Retrofit
+import retrofit2.converter.kotlinx.serialization.asConverterFactory
+import retrofit2.http.Body
+import retrofit2.http.GET
+import retrofit2.http.POST
+import retrofit2.http.Path
 
-/**
- * This class wraps the OSV Rest API client in order to make its use simpler and less error-prone.
- */
-class OsvService(serverUrl: String = OsvApiClient.SERVER_URL_PRODUCTION, httpClient: OkHttpClient? = null) {
-    private val client = OsvApiClient.create(serverUrl, httpClient)
+/** An interface for the REST API of the Google Open Source Vulnerabilities (OSV) service, see https://osv.dev/. */
+interface OsvService {
+    companion object {
+        const val BATCH_REQUEST_MAX_SIZE = 1000
 
-    /**
-     * Get the vulnerabilities for the package matching the given [request].
-     */
-    fun getVulnerabilitiesForPackage(
-        request: VulnerabilitiesForPackageRequest
-    ): Result<List<Vulnerability>> {
-        val response = client.getVulnerabilitiesForPackage(request).execute()
-        val body = response.body()
+        /** The URL of the production server. */
+        const val PRODUCTION_SERVER_URL = "https://api.osv.dev"
 
-        return if (response.isSuccessful && body != null) {
-            Result.success(body.vulnerabilities)
-        } else {
-            Result.failure(IOException(response.message()))
+        /** The URL of the staging server. */
+        const val STAGING_SERVER_URL = "https://api-staging.osv.dev"
+
+        val JSON = Json {
+            namingStrategy = JsonNamingStrategy.SnakeCase
+            ignoreUnknownKeys = true
+        }
+
+        fun create(serverUrl: String? = null, client: OkHttpClient? = null): OsvService {
+            val converterFactory = JSON.asConverterFactory(contentType = "application/json".toMediaType())
+
+            return Retrofit.Builder()
+                .apply { client(client ?: defaultHttpClient()) }
+                .baseUrl(serverUrl ?: PRODUCTION_SERVER_URL)
+                .addConverterFactory(converterFactory)
+                .build()
+                .create(OsvService::class.java)
         }
     }
 
     /**
-     * Return the vulnerability IDs for the respective package matched by the given [requests].
+     * Get the identifiers of the vulnerabilities for the package matched by the given [request]. This corresponds to
+     * the [v1/query](https://google.github.io/osv.dev/post-v1-query/) endpoint, which is a per-package alternative to
+     * [getVulnerabilityIdsForPackages].
      */
-    fun getVulnerabilityIdsForPackages(
-        requests: List<VulnerabilitiesForPackageRequest>
-    ): Result<List<List<String>>> {
-        if (requests.isEmpty()) return Result.success(emptyList())
-
-        val result = mutableListOf<MutableList<String>>()
-
-        requests.chunked(OsvApiClient.BATCH_REQUEST_MAX_SIZE).forEach { requestsChunk ->
-            val batchRequest = VulnerabilitiesForPackageBatchRequest(requestsChunk)
-            val response = client.getVulnerabilityIdsForPackages(batchRequest).execute()
-            val body = response.body()
-
-            if (!response.isSuccessful || body == null) return Result.failure(IOException(response.message()))
-
-            result += body.results.map { batchResponse ->
-                batchResponse.vulnerabilities.mapTo(mutableListOf()) { it.id }
-            }
-        }
-
-        return Result.success(result)
-    }
+    @POST("v1/query")
+    suspend fun getVulnerabilityIdsForPackage(
+        @Body request: VulnerabilitiesForPackageRequest
+    ): VulnerabilitiesForPackageBatchResponse.IdList
 
     /**
-     * Return the vulnerability denoted by the given [id].
+     * Get the identifiers of the vulnerabilities for the packages matched by the respective given [request].
+     * The amount of requests contained in the give [batch request][request] must not exceed [BATCH_REQUEST_MAX_SIZE].
      */
-    fun getVulnerabilityForId(id: String): Result<Vulnerability> {
-        val response = client.getVulnerabilityForId(id).execute()
-        val body = response.body()
+    @POST("v1/querybatch")
+    suspend fun getVulnerabilityIdsForPackages(
+        @Body request: VulnerabilitiesForPackageBatchRequest
+    ): VulnerabilitiesForPackageBatchResponse
 
-        return if (response.isSuccessful && body != null) {
-            Result.success(body)
-        } else {
-            Result.failure(IOException(response.message()))
-        }
-    }
+    /** Return the vulnerability denoted by the given [id]. */
+    @GET("v1/vulns/{id}")
+    suspend fun getVulnerabilityForId(@Path("id") id: String): Vulnerability
+}
+
+/** See https://google.github.io/osv.dev/post-v1-query/#parameters. */
+@Serializable
+data class VulnerabilitiesForPackageRequest(
+    /** The commit hash to query for. If specified, [version] should not be set. */
+    val commit: String? = null,
 
     /**
-     * Return the vulnerabilities denoted by the given [ids].
-     *
-     * This executes a separate request for each given identifier since a batch request is not available.
-     * It's been considered to add a batch API in the future, see
-     * https://github.com/google/osv.dev/issues/466#issuecomment-1163337495.
+     * The version string to query for. A fuzzy match is done against upstream versions. If set, [commit] must not be
+     * used, and [Package.purl] must not include a version.
      */
-    fun getVulnerabilitiesForIds(ids: Set<String>): Result<List<Vulnerability>> {
-        val result = ConcurrentLinkedQueue<Vulnerability>()
-        val failureThrowable = AtomicReference<Throwable?>(null)
-        val latch = CountDownLatch(ids.size)
+    val version: String? = null,
 
-        ids.forEach { id ->
-            client.getVulnerabilityForId(id).enqueue(object : Callback<Vulnerability> {
-                override fun onResponse(call: Call<Vulnerability>, response: Response<Vulnerability>) {
-                    response.body()?.let { result += it }
-                    latch.countDown()
-                }
+    /** The package to query against. When a commit hash is given, this is optional. */
+    @SerialName("package")
+    val pkg: Package? = null
+)
 
-                override fun onFailure(call: Call<Vulnerability>, t: Throwable) {
-                    failureThrowable.set(t)
-                    latch.countDown()
-                }
-            })
-        }
+/** See https://google.github.io/osv.dev/post-v1-querybatch/#parameters. */
+@Serializable
+data class VulnerabilitiesForPackageBatchRequest(
+    /** Each query item must follow the same rules as [VulnerabilitiesForPackageRequest]. */
+    val queries: List<VulnerabilitiesForPackageRequest>
+)
 
-        latch.await()
+/** See https://google.github.io/osv.dev/post-v1-querybatch/#sample-200-response. */
+@Serializable
+data class VulnerabilitiesForPackageBatchResponse(
+    val results: List<IdList>
+) {
+    @Serializable
+    data class IdList(
+        @SerialName("vulns")
+        val vulnerabilities: List<Id> = emptyList()
+    )
 
-        return failureThrowable.get()?.let { Result.failure(it) }
-            ?: Result.success(result.toList())
+    @Serializable
+    data class Id(
+        /** The data-source-specific ID of the vulnerability. */
+        val id: String,
+
+        /** The date when the vulnerability was last modified. */
+        val modified: InstantAsString
+    )
+}
+
+private fun defaultHttpClient(): OkHttpClient {
+    // Experimentally determined value to speed-up execution time of 1000 single vulnerability-by-id requests.
+    val n = 100
+    val dispatcher = Dispatcher(Executors.newFixedThreadPool(n)).apply {
+        maxRequests = n
+        maxRequestsPerHost = n
     }
+
+    return OkHttpClient.Builder().dispatcher(dispatcher).build()
 }

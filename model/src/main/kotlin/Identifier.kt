@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,36 +25,26 @@ import com.fasterxml.jackson.annotation.JsonValue
 import org.ossreviewtoolkit.utils.common.AlphaNumericComparator
 import org.ossreviewtoolkit.utils.common.encodeOr
 
-/**
- * A unique identifier for a software package.
- */
+/** A unique identifier for a software component. */
 data class Identifier(
     /**
-     * The type of package. When used in the context of a [Project], the type is the name of the package manager that
-     * manages the project (e.g. "Gradle" for a Gradle project). When used in the context of a [Package], the type is
-     * the name of the package type or protocol (e.g. "Maven" for a file from a Maven repository).
+     * The type of component this identifier describes. When used in the context of a [Project], the type equals the one
+     * of the package manager that manages the project (e.g. "Gradle" for a Gradle project). When used in the context of
+     * a [Package], the type is the name of the artifact ecosystem (e.g. "Maven" for a file from a Maven repository).
      */
     val type: String,
 
-    /**
-     * The namespace of the package, for example the group for "Maven" or the scope for "NPM".
-     */
+    /** The namespace of the component, for example the group for "Maven" or the scope for "NPM". */
     val namespace: String,
 
-    /**
-     * The name of the package.
-     */
+    /** The name of the component. */
     val name: String,
 
-    /**
-     * The version of the package.
-     */
+    /** The version of the component. */
     val version: String
 ) : Comparable<Identifier> {
     companion object {
-        /**
-         * A constant for an [Identifier] where all properties are empty strings.
-         */
+        /** A constant for an [Identifier] where all properties are empty strings. */
         @JvmField
         val EMPTY = Identifier(
             type = "",
@@ -63,15 +53,16 @@ data class Identifier(
             version = ""
         )
 
+        // This comparator is consistent with `equals()` as all properties are taken into account.
         private val COMPARATOR = compareBy<Identifier>({ it.type }, { it.namespace }, { it.name })
             .thenComparing({ it.version }, AlphaNumericComparator)
     }
 
-    private constructor(components: List<String>) : this(
-        type = components.getOrElse(0) { "" },
-        namespace = components.getOrElse(1) { "" },
-        name = components.getOrElse(2) { "" },
-        version = components.getOrElse(3) { "" }
+    private constructor(properties: List<String>) : this(
+        type = properties.getOrElse(0) { "" },
+        namespace = properties.getOrElse(1) { "" },
+        name = properties.getOrElse(2) { "" },
+        version = properties.getOrElse(3) { "" }
     )
 
     /**
@@ -81,14 +72,14 @@ data class Identifier(
     @JsonCreator
     constructor(identifier: String) : this(identifier.split(':', limit = 4))
 
-    private val sanitizedComponents = listOf(type, namespace, name, version).map { component ->
+    private val sanitizedProperties = listOf(type, namespace, name, version).map { component ->
         component.trim().filterNot { it < ' ' }
     }
 
     init {
-        require(sanitizedComponents.none { ":" in it }) {
+        require(sanitizedProperties.none { ":" in it }) {
             "An identifier's properties must not contain ':' because that character is used as a separator in the " +
-                    "string representation: type='$type', namespace='$namespace', name='$name', version='$version'."
+                "string representation: type='$type', namespace='$namespace', name='$name', version='$version'."
         }
     }
 
@@ -111,16 +102,14 @@ data class Identifier(
             vendorNamespace.isNotEmpty() && namespace.matches(vendorNamespace.toRegex())
         }
 
-    /**
-     * Create Maven-like coordinates based on the properties of the [Identifier].
-     */
+    /** Create Maven-like coordinates based on the properties of the [Identifier]. */
     @JsonValue
-    fun toCoordinates() = sanitizedComponents.joinToString(":")
+    fun toCoordinates() = sanitizedProperties.joinToString(":")
 
     /**
      * Create a file system path based on the properties of the [Identifier]. All properties are encoded using
      * [encodeOr] with [emptyValue] as parameter.
      */
     fun toPath(separator: String = "/", emptyValue: String = "unknown"): String =
-        sanitizedComponents.joinToString(separator) { it.encodeOr(emptyValue) }
+        sanitizedProperties.joinToString(separator) { it.encodeOr(emptyValue) }
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2022 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,45 +19,39 @@
 
 package org.ossreviewtoolkit.model.licenses
 
+import java.util.EnumSet
+
 import org.ossreviewtoolkit.model.LicenseSource
 import org.ossreviewtoolkit.model.config.PathExclude
+import org.ossreviewtoolkit.utils.common.enumSetOf
 import org.ossreviewtoolkit.utils.ort.CopyrightStatementsProcessor
 import org.ossreviewtoolkit.utils.ort.DeclaredLicenseProcessor
-import org.ossreviewtoolkit.utils.spdx.SpdxSingleLicenseExpression
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxSingleLicenseExpression
 
 /**
- * Resolved information for a single license.
+ * Resolved information for a single [license], documenting the [sources] and original license expressions it is
+ * contained in.
  */
 data class ResolvedLicense(
-    /**
-     * The license.
-     */
+    /** The license for which original license [sources] are documented. */
     val license: SpdxSingleLicenseExpression,
 
     /**
-     * The set of original declared license that were [processed][DeclaredLicenseProcessor] to this [license], or an
-     * empty list, if this [license] was not modified during processing.
+     * The set of original declared license that were [processed][DeclaredLicenseProcessor] to the [license], or an
+     * empty list if this [license] was not modified during processing.
      */
     val originalDeclaredLicenses: Set<String>,
 
-    /**
-     * The original SPDX expressions of this license.
-     */
+    /** The original SPDX expressions that contains the [license]. */
     val originalExpressions: Set<ResolvedOriginalExpression>,
 
-    /**
-     * All text locations where this license was found.
-     */
+    /** All text locations where this license was found. */
     val locations: Set<ResolvedLicenseLocation>
 ) {
-    /**
-     * The sources where this license was found.
-     */
-    val sources: Set<LicenseSource> = originalExpressions.mapTo(mutableSetOf()) { it.source }
+    /** The sources where this license was found. */
+    val sources: EnumSet<LicenseSource> = originalExpressions.mapTo(enumSetOf()) { it.source }
 
-    /**
-     * True, if this license was [detected][LicenseSource.DETECTED] and all [locations] have matching path excludes.
-     */
+    /** True, if this license was [detected][LicenseSource.DETECTED] and all [locations] have matching path excludes. */
     val isDetectedExcluded by lazy {
         LicenseSource.DETECTED in sources && locations.all { it.matchingPathExcludes.isNotEmpty() }
     }
@@ -120,14 +114,17 @@ data class ResolvedLicense(
     }
 }
 
-private fun Collection<ResolvedCopyrightFinding>.toResolvedCopyrights(process: Boolean): List<ResolvedCopyright> {
-    if (!process) return map { ResolvedCopyright(it.statement, setOf(it)) }
+internal fun Collection<ResolvedCopyrightFinding>.toResolvedCopyrights(process: Boolean): List<ResolvedCopyright> {
+    val statementToFindings = groupBy { it.statement }
 
-    val statementToFinding = associateBy { it.statement }
-    val result = CopyrightStatementsProcessor.process(statementToFinding.keys)
+    if (!process) {
+        return statementToFindings.map { (statement, findings) -> ResolvedCopyright(statement, findings.toSet()) }
+    }
+
+    val result = CopyrightStatementsProcessor.process(statementToFindings.keys)
 
     val processedCopyrights = result.processedStatements.map { (statement, originalStatements) ->
-        val findings = originalStatements.mapTo(mutableSetOf()) { statementToFinding.getValue(it) }
+        val findings = originalStatements.flatMapTo(mutableSetOf()) { statementToFindings.getValue(it) }
         ResolvedCopyright(statement, findings)
     }
 

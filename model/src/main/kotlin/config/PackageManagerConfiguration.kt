@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2022 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,8 +21,13 @@ package org.ossreviewtoolkit.model.config
 
 import com.fasterxml.jackson.annotation.JsonInclude
 
+import org.ossreviewtoolkit.utils.common.Options
+
 /**
- * The configuration for a package manager.
+ * The configuration model for a package manager. This class is (de-)serialized in the following places:
+ * - Deserialized from "config.yml" as part of [OrtConfiguration] (via Hoplite).
+ * - Deserialized from ".ort.yml" as part of [RepositoryAnalyzerConfiguration] (via Jackson)
+ * - (De-)Serialized as part of [org.ossreviewtoolkit.model.OrtResult] (via Jackson).
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class PackageManagerConfiguration(
@@ -38,18 +43,16 @@ data class PackageManagerConfiguration(
      */
     val options: Options? = null
 ) {
-    /**
-     * Merge this [PackageManagerConfiguration] with [other]. Values of [other] take precedence.
-     */
-    fun merge(other: PackageManagerConfiguration): PackageManagerConfiguration {
+    /** Merge this [PackageManagerConfiguration] with [override]. Values of [override] take precedence. */
+    fun merge(override: PackageManagerConfiguration): PackageManagerConfiguration {
         val mergedOptions = when {
-            options == null -> other.options
-            other.options == null -> options
-            else -> options.toMutableMap() + other.options
+            options == null -> override.options
+            override.options == null -> options
+            else -> options.toMutableMap() + override.options
         }
 
         return PackageManagerConfiguration(
-            mustRunAfter = other.mustRunAfter ?: mustRunAfter,
+            mustRunAfter = override.mustRunAfter ?: mustRunAfter,
             options = mergedOptions
         )
     }

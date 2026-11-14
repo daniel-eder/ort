@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,7 +25,9 @@ import java.io.ByteArrayInputStream
 import java.io.FileNotFoundException
 import java.io.IOException
 
-import org.apache.logging.log4j.kotlin.Logging
+import kotlin.coroutines.cancellation.CancellationException
+
+import org.apache.logging.log4j.kotlin.logger
 
 import org.ossreviewtoolkit.model.ArtifactProvenance
 import org.ossreviewtoolkit.model.KnownProvenance
@@ -34,6 +36,7 @@ import org.ossreviewtoolkit.model.ScanResult
 import org.ossreviewtoolkit.model.yamlMapper
 import org.ossreviewtoolkit.scanner.ProvenanceBasedScanStorage
 import org.ossreviewtoolkit.scanner.ScanStorageException
+import org.ossreviewtoolkit.scanner.ScannerMatcher
 import org.ossreviewtoolkit.scanner.utils.requireEmptyVcsPath
 import org.ossreviewtoolkit.utils.common.collectMessages
 import org.ossreviewtoolkit.utils.common.fileSystemEncode
@@ -41,9 +44,7 @@ import org.ossreviewtoolkit.utils.ort.showStackTrace
 import org.ossreviewtoolkit.utils.ort.storage.FileStorage
 
 class ProvenanceBasedFileStorage(private val backend: FileStorage) : ProvenanceBasedScanStorage {
-    companion object : Logging
-
-    override fun read(provenance: KnownProvenance): List<ScanResult> {
+    override suspend fun read(provenance: KnownProvenance, scannerMatcher: ScannerMatcher?): List<ScanResult> {
         requireEmptyVcsPath(provenance)
 
         val path = storagePath(provenance)
@@ -54,18 +55,21 @@ class ProvenanceBasedFileStorage(private val backend: FileStorage) : ProvenanceB
                     // Use the provided provenance for the result instead of building it from the stored values, because
                     // in the case of a RepositoryRevision only the resolved revision matters.
                     it.copy(provenance = provenance)
-                }
+                }.filter { scannerMatcher?.matches(it.scanner) != false }
             }
         }.getOrElse {
             when (it) {
+                is CancellationException -> throw it
+
                 is FileNotFoundException -> {
                     // If the file cannot be found it means no scan results have been stored, yet.
                     emptyList()
                 }
+
                 else -> {
                     logger.info {
                         "Could not read scan results for '$provenance' from path '$path': " +
-                                it.collectMessages()
+                            it.collectMessages()
                     }
 
                     // TODO: Propagate error.
@@ -75,7 +79,7 @@ class ProvenanceBasedFileStorage(private val backend: FileStorage) : ProvenanceB
         }
     }
 
-    override fun write(scanResult: ScanResult) {
+    override suspend fun write(scanResult: ScanResult): Boolean {
         val provenance = scanResult.provenance
 
         requireEmptyVcsPath(provenance)
@@ -87,9 +91,12 @@ class ProvenanceBasedFileStorage(private val backend: FileStorage) : ProvenanceB
         val existingScanResults = read(provenance)
 
         if (existingScanResults.any { it.matches(scanResult) }) {
-            throw ScanStorageException(
-                "Storage already contains a result for ${scanResult.provenance} and ${scanResult.scanner}."
-            )
+            logger.debug {
+                "Not writing scan result because storage already contains a result for ${scanResult.provenance} and " +
+                    "${scanResult.scanner}."
+            }
+
+            return false
         }
 
         val scanResults = existingScanResults + scanResult
@@ -101,8 +108,11 @@ class ProvenanceBasedFileStorage(private val backend: FileStorage) : ProvenanceB
         runCatching {
             backend.write(path, input)
             logger.debug { "Stored scan result for '$provenance' at path '$path'." }
+            return true
         }.onFailure {
             when (it) {
+                is CancellationException -> throw it
+
                 is IllegalArgumentException, is IOException -> {
                     it.showStackTrace()
 
@@ -110,20 +120,24 @@ class ProvenanceBasedFileStorage(private val backend: FileStorage) : ProvenanceB
                         "Could not store scan result for '$provenance' at path '$path': ${it.collectMessages()}"
                     }
                 }
+
                 else -> throw it
             }
         }
+
+        return false
     }
 }
 
 private fun storagePath(provenance: KnownProvenance) =
     when (provenance) {
         is ArtifactProvenance -> "artifact/${provenance.sourceArtifact.url.fileSystemEncode()}/$SCAN_RESULTS_FILE_NAME"
+
         is RepositoryProvenance -> {
             "repository/${provenance.vcsInfo.type.toString().fileSystemEncode()}" +
-                    "/${provenance.vcsInfo.url.fileSystemEncode()}" +
-                    "/${provenance.resolvedRevision.fileSystemEncode()}" +
-                    "/$SCAN_RESULTS_FILE_NAME"
+                "/${provenance.vcsInfo.url.fileSystemEncode()}" +
+                "/${provenance.resolvedRevision.fileSystemEncode()}" +
+                "/$SCAN_RESULTS_FILE_NAME"
         }
     }
 
@@ -134,8 +148,8 @@ private fun ScanResult.matches(other: ScanResult): Boolean {
     return scanner == other.scanner && when {
         thisProvenance is RepositoryProvenance && otherProvenance is RepositoryProvenance -> {
             thisProvenance.vcsInfo.type == otherProvenance.vcsInfo.type &&
-                    thisProvenance.vcsInfo.url == otherProvenance.vcsInfo.url &&
-                    thisProvenance.resolvedRevision == otherProvenance.resolvedRevision
+                thisProvenance.vcsInfo.url == otherProvenance.vcsInfo.url &&
+                thisProvenance.resolvedRevision == otherProvenance.resolvedRevision
         }
 
         else -> provenance == otherProvenance

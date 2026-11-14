@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,23 +20,66 @@
 package org.ossreviewtoolkit.utils.ort
 
 import io.kotest.core.spec.style.WordSpec
+import io.kotest.matchers.collections.beEmpty
+import io.kotest.matchers.collections.containExactlyInAnyOrder
+import io.kotest.matchers.should
 import io.kotest.matchers.shouldBe
 
-import java.io.File
-
-import org.ossreviewtoolkit.model.yamlMapper
+import org.ossreviewtoolkit.model.toYaml
+import org.ossreviewtoolkit.utils.test.readResource
 
 class CopyrightStatementsProcessorTest : WordSpec({
     "process" should {
         "return a result with items merged by owner and prefix, sorted by owner and year" {
-            val input = File("src/test/assets/copyright-statements.txt").readLines()
+            val statements = readResource("/copyright-statements.txt").lines()
+            val expectedResult = readResource("/copyright-statements-expected-output.yml")
 
-            val result = CopyrightStatementsProcessor.process(input).toYaml()
+            val result = CopyrightStatementsProcessor.process(statements.shuffled()).toYaml()
 
-            val expectedResult = File("src/test/assets/copyright-statements-expected-output.yml").readText()
             result shouldBe expectedResult
+        }
+
+        "group statements with upper-case (C)" {
+            val statements = listOf(
+                "Copyright (C) 2017 The ORT Project Copyright Holders",
+                "Copyright (C) 2022 The ORT Project Copyright Holders"
+            )
+
+            val result = CopyrightStatementsProcessor.process(statements)
+
+            result.processedStatements.keys should containExactlyInAnyOrder(
+                "Copyright (C) 2017, 2022 The ORT Project Copyright Holders"
+            )
+            result.unprocessedStatements should beEmpty()
+        }
+
+        "group statements with lower-case (c)" {
+            val statements = listOf(
+                "Copyright (c) 2017 The ORT Project Copyright Holders",
+                "Copyright (c) 2022 The ORT Project Copyright Holders"
+            )
+
+            val result = CopyrightStatementsProcessor.process(statements)
+
+            result.processedStatements.keys should containExactlyInAnyOrder(
+                "Copyright (c) 2017, 2022 The ORT Project Copyright Holders"
+            )
+            result.unprocessedStatements should beEmpty()
+        }
+
+        "not group statements with mixed-case (C) and (c)" {
+            val statements = listOf(
+                "Copyright (C) 2017 The ORT Project Copyright Holders",
+                "Copyright (c) 2022 The ORT Project Copyright Holders"
+            )
+
+            val result = CopyrightStatementsProcessor.process(statements)
+
+            result.processedStatements.keys should containExactlyInAnyOrder(
+                "Copyright (C) 2017 The ORT Project Copyright Holders",
+                "Copyright (c) 2022 The ORT Project Copyright Holders"
+            )
+            result.unprocessedStatements should beEmpty()
         }
     }
 })
-
-private fun CopyrightStatementsProcessor.Result.toYaml() = yamlMapper.writeValueAsString(this)

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2022 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,35 +21,14 @@ package org.ossreviewtoolkit.scanner
 
 import java.util.ServiceLoader
 
-import org.ossreviewtoolkit.model.config.DownloaderConfiguration
-import org.ossreviewtoolkit.model.config.ScannerConfiguration
+import org.ossreviewtoolkit.plugins.api.PluginFactory
 
-/**
- * A common interface for use with [ServiceLoader] that all [ScannerWrapperFactory] classes need to implement.
- */
-interface ScannerWrapperFactory {
-    /**
-     * The name to use to refer to the scanner wrapper.
-     */
-    val scannerName: String
-
-    /**
-     * Create a [ScannerWrapper] using the specified [scannerConfig] and [downloaderConfig].
-     */
-    fun create(scannerConfig: ScannerConfiguration, downloaderConfig: DownloaderConfiguration): ScannerWrapper
-}
-
-/**
- * A generic factory class for a [ScannerWrapper].
- */
-abstract class AbstractScannerWrapperFactory<out T : ScannerWrapper>(
-    override val scannerName: String
-) : ScannerWrapperFactory {
-    abstract override fun create(scannerConfig: ScannerConfiguration, downloaderConfig: DownloaderConfiguration): T
-
-    /**
-     * Return the scanner wrapper's name here to allow Clikt to display something meaningful when listing the scanners
-     * which are enabled by default via their factories.
-     */
-    override fun toString() = scannerName
+/** A common abstract class for use with [ServiceLoader] that all [ScannerWrapperFactory] classes need to implement. */
+interface ScannerWrapperFactory : PluginFactory<ScannerWrapper> {
+    companion object {
+        /**
+         * All [scanner wrapper factories][ScannerWrapperFactory] available in the classpath, associated by their names.
+         */
+        val ALL by lazy { PluginFactory.getAll<ScannerWrapperFactory, ScannerWrapper>() }
+    }
 }

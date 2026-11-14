@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,7 +34,7 @@ abstract class AbstractNestedProvenanceStorageFunTest(vararg listeners: TestList
     protected abstract fun createStorage(): NestedProvenanceStorage
 
     init {
-        register(*listeners)
+        extensions(listeners.asList())
 
         beforeEach {
             storage = createStorage()
@@ -45,7 +45,7 @@ abstract class AbstractNestedProvenanceStorageFunTest(vararg listeners: TestList
                 val root = createRepositoryProvenance()
                 val result = NestedProvenanceResolutionResult(createNestedProvenance(root), true)
 
-                storage.putNestedProvenance(root, result)
+                storage.writeNestedProvenance(root, result)
 
                 storage.readNestedProvenance(root) shouldBe result
             }
@@ -57,8 +57,8 @@ abstract class AbstractNestedProvenanceStorageFunTest(vararg listeners: TestList
                 )
                 val result2 = NestedProvenanceResolutionResult(createNestedProvenance(root), true)
 
-                storage.putNestedProvenance(root, result1)
-                storage.putNestedProvenance(root, result2)
+                storage.writeNestedProvenance(root, result1)
+                storage.writeNestedProvenance(root, result2)
 
                 storage.readNestedProvenance(root) shouldBe result2
             }

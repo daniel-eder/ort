@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,14 +19,22 @@
 
 package org.ossreviewtoolkit.model.config
 
+import com.fasterxml.jackson.annotation.JsonAlias
 import com.fasterxml.jackson.annotation.JsonInclude
+import com.fasterxml.jackson.annotation.JsonPropertyOrder
+
+import com.sksamuel.hoplite.ConfigAlias
 
 import org.ossreviewtoolkit.model.utils.FileArchiver
+import org.ossreviewtoolkit.plugins.api.PluginConfig
+import org.ossreviewtoolkit.utils.ort.ORT_REPO_CONFIG_FILENAME
 import org.ossreviewtoolkit.utils.ort.storage.FileStorage
 import org.ossreviewtoolkit.utils.spdx.SpdxConstants
 
 /**
- * The configuration model of the scanner.
+ * The configuration model of the scanner. This class is (de-)serialized in the following places:
+ * - Deserialized from "config.yml" as part of [OrtConfiguration] (via Hoplite).
+ * - (De-)Serialized as part of [org.ossreviewtoolkit.model.OrtResult] (via Jackson).
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class ScannerConfiguration(
@@ -36,20 +44,20 @@ data class ScannerConfiguration(
      */
     val skipConcluded: Boolean = false,
 
-    /**
-     * Configuration of a [FileArchiver] that archives certain scanned files in an external [FileStorage].
-     */
-    val archive: FileArchiverConfiguration? = null,
+    /** A flag to control whether excluded scopes and paths should be skipped during the scan. */
+    val skipExcluded: Boolean = false,
 
-    /**
-     * Create archives for packages that have a stored scan result but no license archive yet.
-     */
-    val createMissingArchives: Boolean = false,
+    /** A flag to indicate whether the scanner should add files without license to the scanner results. */
+    val includeFilesWithoutFindings: Boolean = false,
+
+    /** Configuration of a [FileArchiver] that archives certain scanned files in an external [FileStorage]. */
+    val archive: FileArchiverConfiguration? = null,
 
     /**
      * Mappings from licenses returned by the scanner to valid SPDX licenses. Note that these mappings are only applied
      * in new scans, stored scan results are not affected.
      */
+    @JsonPropertyOrder(alphabetic = true)
     val detectedLicenseMapping: Map<String, String> = mapOf(
         // https://scancode-licensedb.aboutcode.org/?search=generic
         "LicenseRef-scancode-agpl-generic-additional-terms" to SpdxConstants.NOASSERTION,
@@ -73,11 +81,16 @@ data class ScannerConfiguration(
         "LicenseRef-scancode-unknown-spdx" to SpdxConstants.NOASSERTION
     ),
 
+    /** The storage to store the file lists by provenance. */
+    val fileListStorage: FileListStorageConfiguration? = null,
+
     /**
-     * Scanner specific configuration options. The key needs to match the name of the scanner class, e.g. "ScanCode"
+     * Scanner-specific configuration options. The key needs to match the name of the scanner class, e.g. "ScanCode"
      * for the ScanCode wrapper. See the documentation of the scanner for available options.
      */
-    val options: Map<String, Options>? = null,
+    @ConfigAlias("config")
+    @JsonAlias("config")
+    val scanners: Map<String, PluginConfig>? = null,
 
     /**
      * A map with the configurations of the scan result storages available. Based on this information the actual
@@ -88,32 +101,28 @@ data class ScannerConfiguration(
 
     /**
      * A list with the IDs of scan storages that are queried for existing scan results. The strings in this list
-     * must match keys in the storages map.
+     * must match keys in the [storages] map.
      */
     val storageReaders: List<String>? = null,
 
     /**
      * A list with the IDs of scan storages that are called to persist scan results. The strings in this list
-     * must match keys in the storages map.
+     * must match keys in the [storages] map.
      */
     val storageWriters: List<String>? = null,
 
-    /**
-     * A list of glob expressions that match file paths which are to be excluded from scan results.
-     */
+    /** A list of glob expressions that match file paths which are to be excluded from scan results. */
     val ignorePatterns: List<String> = listOf(
-        "**/*.ort.yml",
+        "**/*$ORT_REPO_CONFIG_FILENAME",
         "**/*.spdx.yml",
         "**/*.spdx.yaml",
         "**/*.spdx.json",
         "**/META-INF/DEPENDENCIES",
         "**/META-INF/DEPENDENCIES.txt",
-        "**/META-INF/NOTICE",
-        "**/META-INF/NOTICE.txt"
+        "**/META-INF/*NOTICE*",
+        "**/META-INF/*NOTICE*.txt"
     ),
 
-    /**
-     * Configuration of the storage for provenance information.
-     */
+    /** Configuration of the storage for provenance information. */
     val provenanceStorage: ProvenanceStorageConfiguration? = null
 )

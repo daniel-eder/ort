@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,16 +19,17 @@
 
 package org.ossreviewtoolkit.clients.vulnerablecode
 
-import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
-
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNames
+import kotlinx.serialization.json.JsonNamingStrategy
 
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 
 import retrofit2.Retrofit
+import retrofit2.converter.kotlinx.serialization.asConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.POST
 
@@ -38,19 +39,31 @@ import retrofit2.http.POST
  */
 interface VulnerableCodeService {
     companion object {
-        /**
-         * The JSON (de-)serialization object used by this service.
-         */
-        val JSON = Json { ignoreUnknownKeys = true }
+        /** The JSON (de-)serialization object used by this service. */
+        val JSON = Json {
+            ignoreUnknownKeys = true
+            namingStrategy = JsonNamingStrategy.SnakeCase
+        }
 
         /**
          * Create a new service instance that connects to the [url] specified and uses the optionally provided [client].
          */
-        fun create(url: String, client: OkHttpClient? = null): VulnerableCodeService {
+        fun create(url: String? = null, apiKey: String? = null, client: OkHttpClient? = null): VulnerableCodeService {
+            val vulnerableCodeClient = (client ?: OkHttpClient()).run {
+                newBuilder().addInterceptor { chain ->
+                    val request = chain.request().newBuilder()
+                        .apply { if (apiKey != null) header("Authorization", "Token $apiKey") }
+                        .header("User-Agent", VULNERABLE_CODE_USER_AGENT)
+                        .build()
+
+                    chain.proceed(request)
+                }.build()
+            }
+
             val contentType = "application/json".toMediaType()
             val retrofit = Retrofit.Builder()
-                .apply { if (client != null) client(client) }
-                .baseUrl(url)
+                .client(vulnerableCodeClient)
+                .baseUrl(url ?: VULNERABLE_CODE_BASE_URL)
                 .addConverterFactory(JSON.asConverterFactory(contentType))
                 .build()
 
@@ -61,12 +74,16 @@ interface VulnerableCodeService {
     /**
      * Data class that represents a score assigned to a vulnerability. A source of vulnerability information can
      * provide multiple score values using different scoring systems.
+     *
+     * See https://github.com/aboutcode-org/vulnerablecode/blob/v36.1.3/vulnerabilities/api.py#L42-L44.
      */
     @Serializable
     data class Score(
         /** The name of the scoring system. */
-        @SerialName("scoring_system")
         val scoringSystem: String,
+
+        /** The individual scoring elements, usually a CVSS vector. */
+        val scoringElements: String? = null,
 
         /**
          * The value in this scoring system. This is a string to support scoring systems that do not use numeric
@@ -78,12 +95,12 @@ interface VulnerableCodeService {
     /**
      * Data class representing a reference to detailed information about a vulnerability. Information about a single
      * vulnerability can come from multiple sources; for each of these sources a reference is added to the data.
+     *
+     * See https://github.com/aboutcode-org/vulnerablecode/blob/v36.1.3/vulnerabilities/api.py#L58-L60.
      */
     @Serializable
     data class VulnerabilityReference(
-        /**
-         * The URL of this reference. From this URL, it is also possible to identify the source of information.
-         */
+        /** The URL of this reference. From this URL, it is also possible to identify the source of information. */
         val url: String,
 
         /**
@@ -93,35 +110,60 @@ interface VulnerableCodeService {
         val scores: List<Score>
     )
 
+    /** Data class describing a package version that fixes a vulnerability. */
+    @Serializable
+    data class FixedPackage(
+        /** The purl identifying this package. */
+        val purl: String
+    )
+
     /**
      * Data class representing a single vulnerability with its references to detailed information.
+     *
+     * See https://github.com/aboutcode-org/vulnerablecode/blob/v36.1.3/vulnerabilities/api.py#L176-L188.
      */
     @Serializable
     data class Vulnerability(
-        /** A URL with information about the vulnerability. */
-        @SerialName("vulnerability_id")
+        /** The VulnerableCode-specific identifier for this vulnerability. */
         val vulnerabilityId: String,
 
+        /** A description of the vulnerability. Older versions of VulnerableCode do not have this field. */
+        @SerialName("summary")
+        val description: String? = null,
+
         /** A list with [VulnerabilityReference]s pointing to sources of information about this vulnerability. */
-        val references: List<VulnerabilityReference>
+        val references: List<VulnerabilityReference>,
+
+        /**
+         * A list with strings representing alias identifiers for this vulnerability as they are used by other
+         * databases. VulnerableCode here returns plain strings without further context information; therefore, it is
+         * currently only possible to determine the source of a specific identifier from its structure, e.g. if it has
+         * a well-known prefix like CVE or GHSA.
+         */
+        val aliases: List<String> = emptyList(),
+
+        /** A list with packages that fix this vulnerability. */
+        val fixedPackages: List<FixedPackage> = emptyList()
     )
 
     /**
      * Data class describing a package in the result of a package query together with the vulnerabilities known for
      * this package.
+     *
+     * See https://github.com/aboutcode-org/vulnerablecode/blob/v36.1.3/vulnerabilities/api.py#L396-L413.
      */
     @Serializable
     data class PackageVulnerabilities(
-        /** The PURL identifying this package. */
+        /** The purl identifying this package. */
         val purl: String,
 
         /** An optional list with vulnerabilities that have not yet been resolved. */
-        @SerialName("unresolved_vulnerabilities")
-        val unresolvedVulnerabilities: List<Vulnerability> = emptyList(),
+        @JsonNames("unresolved_vulnerabilities")
+        val affectedByVulnerabilities: List<Vulnerability> = emptyList(),
 
         /** An optional list with vulnerabilities that have already been resolved. */
-        @SerialName("resolved_vulnerabilities")
-        val resolvedVulnerabilities: List<Vulnerability> = emptyList()
+        @JsonNames("resolved_vulnerabilities")
+        val fixingVulnerabilities: List<Vulnerability> = emptyList()
     )
 
     /**
@@ -139,6 +181,6 @@ interface VulnerableCodeService {
      * Return a list with information about packages including the resolved and unresolved vulnerabilities for these
      * packages.
      */
-    @POST("api/packages/bulk_search")
+    @POST("packages/bulk_search")
     suspend fun getPackageVulnerabilities(@Body packageUrls: PackagesWrapper): List<PackageVulnerabilities>
 }

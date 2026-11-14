@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,23 +19,15 @@
 
 package org.ossreviewtoolkit.model
 
-/**
- * A class representing a single copyright finding.
- */
+/** A class representing a single copyright finding. */
 data class CopyrightFinding(
-    /**
-     * The copyright statement.
-     */
+    /** The copyright statement. */
     val statement: String,
 
-    /**
-     * The text location where the copyright statement was found.
-     */
+    /** The text location where the copyright statement was found. */
     val location: TextLocation
-) : Comparable<CopyrightFinding> {
+) {
     companion object {
-        private val COMPARATOR = compareBy<CopyrightFinding>({ it.statement }, { it.location })
+        val COMPARATOR = compareBy<CopyrightFinding>({ it.statement }, { it.location })
     }
-
-    override fun compareTo(other: CopyrightFinding) = COMPARATOR.compare(this, other)
 }

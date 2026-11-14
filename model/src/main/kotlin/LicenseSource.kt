@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,13 +19,9 @@
 
 package org.ossreviewtoolkit.model
 
-/**
- * The source where a license originates from.
- */
+/** The source where a license originates from. */
 enum class LicenseSource {
-    /**
-     * Licenses which are part of the [concluded license][Package.concludedLicense] of a [Package].
-     */
+    /** Licenses which are part of the [concluded license][Package.concludedLicense] of a [Package]. */
     CONCLUDED,
 
     /**
@@ -34,8 +30,6 @@ enum class LicenseSource {
      */
     DECLARED,
 
-    /**
-     * Licenses which were detected by a license scanner.
-     */
+    /** Licenses which were detected by a license scanner. */
     DETECTED
 }

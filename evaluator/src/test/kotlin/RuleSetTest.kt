@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,14 +28,14 @@ import io.mockk.every
 import io.mockk.spyk
 
 import org.ossreviewtoolkit.model.licenses.LicenseView
-import org.ossreviewtoolkit.utils.spdx.SpdxExpression
-import org.ossreviewtoolkit.utils.spdx.toSpdx
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxExpression
+import org.ossreviewtoolkit.utils.spdxexpression.toSpdx
 
 class RuleSetTest : WordSpec({
     val errorMessage = "error message"
     val howToFix = "how to fix"
 
-    "package rule" should {
+    "packageRule()" should {
         "add errors if it has no requirements" {
             val ruleSet = ruleSet(ortResult) {
                 packageRule("test") {
@@ -81,7 +81,7 @@ class RuleSetTest : WordSpec({
         }
     }
 
-    "dependency rule" should {
+    "dependencyRule()" should {
         "add errors if it has no requirements" {
             val ruleSet = ruleSet(ortResult) {
                 dependencyRule("test") {
@@ -171,6 +171,7 @@ class RuleSetTest : WordSpec({
                         every { ref.id } answers { node.id.copy(name = node.id.name + "-ref") }
                         ref
                     }
+
                     spyNode
                 }
             }

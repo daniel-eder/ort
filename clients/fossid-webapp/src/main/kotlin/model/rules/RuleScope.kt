@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2022 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,17 +19,11 @@
 
 package org.ossreviewtoolkit.clients.fossid.model.rules
 
-/**
- * The scope of an [IgnoreRule].
- */
+/** The scope of an [IgnoreRule]. */
 enum class RuleScope {
-    /**
-     * The corresponding rule applies to every scan.
-     */
+    /** The corresponding rule applies to every scan. */
     GLOBAL,
 
-    /**
-     * The corresponding rule applies to a specific scan.
-     */
+    /** The corresponding rule applies to a specific scan. */
     SCAN
 }

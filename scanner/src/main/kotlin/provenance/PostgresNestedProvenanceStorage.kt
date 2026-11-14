@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,31 +21,29 @@ package org.ossreviewtoolkit.scanner.provenance
 
 import javax.sql.DataSource
 
-import org.jetbrains.exposed.dao.id.IntIdTable
-import org.jetbrains.exposed.sql.Database
-import org.jetbrains.exposed.sql.SchemaUtils
-import org.jetbrains.exposed.sql.SchemaUtils.withDataBaseLock
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.inList
-import org.jetbrains.exposed.sql.and
-import org.jetbrains.exposed.sql.deleteWhere
-import org.jetbrains.exposed.sql.insert
-import org.jetbrains.exposed.sql.select
+import org.jetbrains.exposed.v1.core.and
+import org.jetbrains.exposed.v1.core.dao.id.IntIdTable
+import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.inList
+import org.jetbrains.exposed.v1.jdbc.Database
+import org.jetbrains.exposed.v1.jdbc.SchemaUtils
+import org.jetbrains.exposed.v1.jdbc.SchemaUtils.withDataBaseLock
+import org.jetbrains.exposed.v1.jdbc.deleteWhere
+import org.jetbrains.exposed.v1.jdbc.insert
+import org.jetbrains.exposed.v1.jdbc.selectAll
 
 import org.ossreviewtoolkit.model.RepositoryProvenance
 import org.ossreviewtoolkit.model.utils.DatabaseUtils.checkDatabaseEncoding
+import org.ossreviewtoolkit.model.utils.DatabaseUtils.suspendTransaction
 import org.ossreviewtoolkit.model.utils.DatabaseUtils.tableExists
 import org.ossreviewtoolkit.model.utils.DatabaseUtils.transaction
 import org.ossreviewtoolkit.scanner.storages.utils.jsonb
 
 class PostgresNestedProvenanceStorage(
-    /**
-     * The JDBC data source to obtain database connections.
-     */
+    /** The JDBC data source to obtain database connections. */
     private val dataSource: Lazy<DataSource>,
 
-    /**
-     * The name of the table used for storing nested provenances.
-     */
+    /** The name of the table used for storing nested provenances. */
     private val tableName: String = "nested_provenances"
 ) : NestedProvenanceStorage {
     private val table = NestedProvenances(tableName)
@@ -57,6 +55,7 @@ class PostgresNestedProvenanceStorage(
                 withDataBaseLock {
                     if (!tableExists(tableName)) {
                         checkDatabaseEncoding()
+                        @Suppress("DEPRECATION")
                         SchemaUtils.createMissingTablesAndColumns(table)
                     }
                 }
@@ -64,22 +63,22 @@ class PostgresNestedProvenanceStorage(
         }
     }
 
-    override fun readNestedProvenance(root: RepositoryProvenance): NestedProvenanceResolutionResult? =
-        database.transaction {
-            table.select {
+    override suspend fun readNestedProvenance(root: RepositoryProvenance): NestedProvenanceResolutionResult? =
+        database.suspendTransaction {
+            table.selectAll().where {
                 table.vcsType eq root.vcsInfo.type.toString() and
-                        (table.vcsUrl eq root.vcsInfo.url) and
-                        (table.vcsRevision eq root.resolvedRevision)
+                    (table.vcsUrl eq root.vcsInfo.url) and
+                    (table.vcsRevision eq root.resolvedRevision)
             }.map { it[table.result] }.find { it.nestedProvenance.root == root }
         }
 
-    override fun putNestedProvenance(root: RepositoryProvenance, result: NestedProvenanceResolutionResult) {
-        database.transaction {
-            val idsToRemove = table.select {
+    override suspend fun writeNestedProvenance(root: RepositoryProvenance, result: NestedProvenanceResolutionResult) {
+        database.suspendTransaction {
+            val idsToRemove = table.selectAll().where {
                 table.vcsType eq root.vcsInfo.type.toString() and
-                        (table.vcsUrl eq root.vcsInfo.url) and
-                        (table.vcsRevision eq root.resolvedRevision)
-            }.filter { it[table.result].nestedProvenance.root == root }.map { it[table.id].value }
+                    (table.vcsUrl eq root.vcsInfo.url) and
+                    (table.vcsRevision eq root.resolvedRevision)
+            }.filter { it[table.result].nestedProvenance.root == root }.map { it[table.id] }
 
             table.deleteWhere { table.id inList idsToRemove }
 
@@ -97,7 +96,7 @@ private class NestedProvenances(tableName: String) : IntIdTable(tableName) {
     val vcsType = text("vcs_type")
     val vcsUrl = text("vcs_url")
     val vcsRevision = text("vcs_revision")
-    val result = jsonb("result", NestedProvenanceResolutionResult::class)
+    val result = jsonb<NestedProvenanceResolutionResult>("result")
 
     init {
         // Index to improve lookup performance.

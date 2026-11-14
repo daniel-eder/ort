@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,6 @@ import io.kotest.core.spec.style.WordSpec
 import io.kotest.matchers.shouldBe
 
 import java.io.File
-import java.lang.IllegalArgumentException
 
 class HashTest : WordSpec({
     "Passing a single string value to create()" should {
@@ -33,11 +32,11 @@ class HashTest : WordSpec({
         }
 
         "create an UNKNOWN hash from the 'UNKOWN' value" {
-            Hash.create("UNKNOWN").algorithm shouldBe HashAlgorithm.UNKNOWN
+            Hash.create("UNKNOWN") shouldBe Hash("UNKNOWN", HashAlgorithm.UNKNOWN)
         }
 
         "create an UNKNOWN hash from a value that matches no other hash" {
-            Hash.create("0123456789").algorithm shouldBe HashAlgorithm.UNKNOWN
+            Hash.create("0123456789") shouldBe Hash("0123456789", HashAlgorithm.UNKNOWN)
         }
 
         "create a SHA1 hash from a SHA-1 value" {
@@ -59,7 +58,7 @@ class HashTest : WordSpec({
         "create a SHA512 hash from a SHA-512 value" {
             Hash.create(
                 "760d9348be5813285b8ad38795a2a5afe788bcddab4f7190ed581c6ea524c0d67a7dd5bdd5384f197e3b5a58c070ab5b" +
-                        "db704493cc8e0ad63ab35f753b6d61bf"
+                    "db704493cc8e0ad63ab35f753b6d61bf"
             ).algorithm shouldBe HashAlgorithm.SHA512
         }
 
@@ -73,12 +72,12 @@ class HashTest : WordSpec({
 
     "Passing a string value and name to create()" should {
         "succeed if the name is valid for the created hash" {
-            Hash.create("6a7d2814506e9801f13e767964ae3a8f", "MD5").algorithm shouldBe HashAlgorithm.MD5
+            Hash("6a7d2814506e9801f13e767964ae3a8f", "MD5").algorithm shouldBe HashAlgorithm.MD5
         }
 
         "fail if the name is invalid for the created hash" {
             shouldThrow<IllegalArgumentException> {
-                Hash.create("0123456789", "MD5")
+                Hash("0123456789", "MD5")
             }
         }
     }
@@ -96,16 +95,18 @@ class HashTest : WordSpec({
         }
     }
 
+    "equals()" should {
+        "be insensitive to the hash's case" {
+            (Hash.create("foo") == Hash.create("FOO")) shouldBe true
+        }
+    }
+
     "verify()" should {
         "be insensitive to the hash's case" {
             val licenseFile = File("../LICENSE")
 
             Hash.create("c00ef43045659b53da5d71d49b8cd7e528c9d55b").verify(licenseFile) shouldBe true
             Hash.create("C00EF43045659B53DA5D71D49B8CD7E528C9D55B").verify(licenseFile) shouldBe true
-
-            Hash.create("c00ef43045659b53da5d71d49b8cd7e528c9d55b").verify(
-                Hash.create("C00EF43045659B53DA5D71D49B8CD7E528C9D55B")
-            ) shouldBe true
         }
     }
 })

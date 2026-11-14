@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,27 +19,42 @@
 
 plugins {
     // Apply core plugins.
-    `java-library`
+    `java-test-fixtures`
+
+    // Apply precompiled plugins.
+    id("ort-library-conventions")
 }
 
 dependencies {
-    api(project(":clients:clearly-defined"))
-    api(project(":utils:ort-utils"))
-    api(project(":utils:spdx-utils"))
+    api(projects.clients.clearlyDefinedClient)
+    api(projects.plugins.api)
+    api(projects.utils.ortUtils)
+    api(projects.utils.spdxExpressionUtils)
+    api(jacksonLibs.jacksonDatabind)
+    api(jacksonLibs.jacksonDataformatYaml)
+    api(libs.exposed.core)
+    api(libs.exposed.jdbc)
+    api(libs.hoplite.core)
+    api(libs.log4j.api)
+    api(libs.packageurl)
 
-    api(libs.jacksonDatabind)
-    api(libs.jacksonDataformatXml)
-    api(libs.jacksonDataformatYaml)
-
-    implementation(libs.bundles.exposed)
-    implementation(libs.bundles.hoplite)
+    implementation(projects.utils.commonUtils)
+    implementation(projects.utils.spdxUtils)
+    implementation(jacksonLibs.jacksonDatatypeJsr310)
+    implementation(jacksonLibs.jacksonModuleKotlin)
     implementation(libs.hikari)
-    implementation(libs.jacksonDatatypeJsr310)
-    implementation(libs.jacksonModuleJaxbAnnotations)
-    implementation(libs.jacksonModuleKotlin)
-    implementation(libs.postgres)
     implementation(libs.semver4j)
+    implementation(libs.tika)
 
+    funTestImplementation(projects.utils.testUtils)
+
+    runtimeOnly(libs.exposed.dao)
+    runtimeOnly(libs.hoplite.yaml)
+    runtimeOnly(libs.postgres)
+
+    testFixturesImplementation(projects.utils.testUtils)
+
+    testImplementation(projects.utils.testUtils)
     testImplementation(libs.jsonSchemaValidator)
     testImplementation(libs.mockk)
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,20 +18,37 @@
  */
 
 plugins {
-    // Apply core plugins.
-    `java-library`
+    // Apply precompiled plugins.
+    id("ort-library-conventions")
+
+    // Apply third-party plugins.
+    alias(libs.plugins.buildConfig)
+}
+
+buildConfig {
+    packageName = "$group.${projectDir.name}"
+
+    buildConfigField("ORT_VERSION", provider { project.version.toString() })
 }
 
 dependencies {
-    api(project(":utils:common-utils"))
-
+    api(projects.utils.spdxExpressionUtils)
+    api(libs.kotlinx.coroutines)
     api(libs.okhttp)
 
-    implementation(project(":utils:spdx-utils"))
-
+    implementation(projects.clients.foojayClient)
+    implementation(projects.utils.authenticationUtils)
+    implementation(projects.utils.commonUtils)
+    implementation(projects.utils.spdxUtils)
+    implementation(libs.awsS3)
     implementation(libs.commonsCompress)
-    implementation(libs.kotlinxCoroutines)
-    implementation(libs.xz)
 
+    implementation(libs.xz) {
+        because("XZOutputStream is a supertype of XZCompressorOutputStream.")
+    }
+
+    funTestImplementation(libs.mockk)
+
+    testImplementation(projects.utils.testUtils)
     testImplementation(libs.mockk)
 }

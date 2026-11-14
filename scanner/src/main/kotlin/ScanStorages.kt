@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2022 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@
 
 package org.ossreviewtoolkit.scanner
 
-import org.ossreviewtoolkit.model.Identifier
+import org.ossreviewtoolkit.model.Package
 import org.ossreviewtoolkit.model.ScanResult
 import org.ossreviewtoolkit.model.config.ClearlyDefinedStorageConfiguration
 import org.ossreviewtoolkit.model.config.FileBasedStorageConfiguration
@@ -27,7 +27,6 @@ import org.ossreviewtoolkit.model.config.PostgresStorageConfiguration
 import org.ossreviewtoolkit.model.config.ScanStorageConfiguration
 import org.ossreviewtoolkit.model.config.ScannerConfiguration
 import org.ossreviewtoolkit.model.config.StorageType
-import org.ossreviewtoolkit.model.config.Sw360StorageConfiguration
 import org.ossreviewtoolkit.model.utils.DatabaseUtils
 import org.ossreviewtoolkit.scanner.provenance.NestedProvenance
 import org.ossreviewtoolkit.scanner.provenance.NestedProvenanceScanResult
@@ -37,17 +36,15 @@ import org.ossreviewtoolkit.scanner.provenance.ResolvedArtifactProvenance
 import org.ossreviewtoolkit.scanner.provenance.ResolvedRepositoryProvenance
 import org.ossreviewtoolkit.scanner.provenance.UnresolvedPackageProvenance
 import org.ossreviewtoolkit.scanner.storages.ClearlyDefinedStorage
-import org.ossreviewtoolkit.scanner.storages.FileBasedStorage
-import org.ossreviewtoolkit.scanner.storages.PostgresStorage
+import org.ossreviewtoolkit.scanner.storages.PackageBasedFileStorage
+import org.ossreviewtoolkit.scanner.storages.PackageBasedPostgresStorage
 import org.ossreviewtoolkit.scanner.storages.ProvenanceBasedFileStorage
 import org.ossreviewtoolkit.scanner.storages.ProvenanceBasedPostgresStorage
-import org.ossreviewtoolkit.scanner.storages.Sw360Storage
+import org.ossreviewtoolkit.utils.common.div
 import org.ossreviewtoolkit.utils.ort.ortDataDirectory
 import org.ossreviewtoolkit.utils.ort.storage.XZCompressedLocalFileStorage
 
-/**
- * A holder for [ScanStorage] [readers] and [writers].
- */
+/** A holder for [ScanStorage] [readers] and [writers]. */
 class ScanStorages(
     val readers: List<ScanStorageReader>,
     val writers: List<ScanStorageWriter>,
@@ -62,16 +59,15 @@ class ScanStorages(
         fun createFromConfig(config: ScannerConfiguration): ScanStorages {
             val storages = config.storages.orEmpty().mapValues { createStorage(it.value) }
 
-            fun resolve(name: String): ScanStorage = requireNotNull(storages[name]) {
-                "Could not resolve storage '$name'."
-            }
+            fun resolve(name: String): ScanStorage =
+                requireNotNull(storages[name]) {
+                    "Could not resolve storage '$name'."
+                }
 
-            val defaultStorage = createDefaultStorage()
+            val defaultStorage by lazy { createDefaultStorage() }
 
-            val readers = config.storageReaders.orEmpty().map { resolve(it) }.takeIf { it.isNotEmpty() }
-                ?: listOf(defaultStorage)
-            val writers = config.storageWriters.orEmpty().map { resolve(it) }.takeIf { it.isNotEmpty() }
-                ?: listOf(defaultStorage)
+            val readers = config.storageReaders.orEmpty().map { resolve(it) }.ifEmpty { listOf(defaultStorage) }
+            val writers = config.storageWriters.orEmpty().map { resolve(it) }.ifEmpty { listOf(defaultStorage) }
 
             val packageProvenanceStorage = PackageProvenanceStorage.createFromConfig(config)
             val nestedProvenanceStorage = NestedProvenanceStorage.createFromConfig(config)
@@ -81,11 +77,11 @@ class ScanStorages(
     }
 
     /**
-     * Read all [ScanResult]s for the provided [id]. Returns an empty list if no stored scan results or no stored
-     * provenance can be found.
+     * Read all [ScanResult]s for the provided [package][pkg]. Returns an empty list if no stored scan results or no
+     * stored provenance can be found.
      */
-    fun read(id: Identifier): List<ScanResult> {
-        val packageProvenances = packageProvenanceStorage.readProvenances(id)
+    suspend fun read(pkg: Package): List<ScanResult> {
+        val packageProvenances = packageProvenanceStorage.readProvenances(pkg.id)
 
         val nestedProvenances = packageProvenances.mapNotNull { result ->
             when (result) {
@@ -105,11 +101,11 @@ class ScanStorages(
 
         nestedProvenances.forEach { nestedProvenance ->
             results += readers.filterIsInstance<PackageBasedScanStorageReader>().flatMap { reader ->
-                reader.read(id, nestedProvenance).flatMap { it.merge() }
+                reader.read(pkg, nestedProvenance).flatMap { it.merge() }
             }
 
             results += readers.filterIsInstance<ProvenanceBasedScanStorageReader>().mapNotNull { reader ->
-                val scanResults = nestedProvenance.getProvenances().associateWith { reader.read(it) }
+                val scanResults = nestedProvenance.allProvenances.associateWith { reader.read(it) }
                 NestedProvenanceScanResult(nestedProvenance, scanResults).takeIf { it.isComplete() }?.merge()
             }.flatten()
         }
@@ -119,7 +115,7 @@ class ScanStorages(
 }
 
 private fun createDefaultStorage(): ScanStorage {
-    val localFileStorage = XZCompressedLocalFileStorage(ortDataDirectory.resolve("$TOOL_NAME/results"))
+    val localFileStorage = XZCompressedLocalFileStorage(ortDataDirectory / "scanner" / "results")
     return ProvenanceBasedFileStorage(localFileStorage)
 }
 
@@ -128,26 +124,23 @@ private fun createStorage(config: ScanStorageConfiguration): ScanStorage =
         is FileBasedStorageConfiguration -> createFileBasedStorage(config)
         is PostgresStorageConfiguration -> createPostgresStorage(config)
         is ClearlyDefinedStorageConfiguration -> createClearlyDefinedStorage(config)
-        is Sw360StorageConfiguration -> createSw360Storage(config)
     }
 
 private fun createFileBasedStorage(config: FileBasedStorageConfiguration) =
     when (config.type) {
-        StorageType.PACKAGE_BASED -> FileBasedStorage(config.backend.createFileStorage())
+        StorageType.PACKAGE_BASED -> PackageBasedFileStorage(config.backend.createFileStorage())
         StorageType.PROVENANCE_BASED -> ProvenanceBasedFileStorage(config.backend.createFileStorage())
     }
 
 private fun createPostgresStorage(config: PostgresStorageConfiguration) =
     when (config.type) {
-        StorageType.PACKAGE_BASED -> PostgresStorage(
-            DatabaseUtils.createHikariDataSource(config = config.connection, applicationNameSuffix = TOOL_NAME),
-            config.connection.parallelTransactions
+        StorageType.PACKAGE_BASED -> PackageBasedPostgresStorage(
+            DatabaseUtils.createHikariDataSource(config = config.connection, applicationNameSuffix = "scanner")
         )
+
         StorageType.PROVENANCE_BASED -> ProvenanceBasedPostgresStorage(
-            DatabaseUtils.createHikariDataSource(config = config.connection, applicationNameSuffix = TOOL_NAME)
+            DatabaseUtils.createHikariDataSource(config = config.connection, applicationNameSuffix = "scanner")
         )
     }
 
 private fun createClearlyDefinedStorage(config: ClearlyDefinedStorageConfiguration) = ClearlyDefinedStorage(config)
-
-private fun createSw360Storage(config: Sw360StorageConfiguration) = Sw360Storage(config)

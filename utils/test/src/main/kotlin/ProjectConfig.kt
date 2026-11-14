@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2020 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,24 +20,13 @@
 package org.ossreviewtoolkit.utils.test
 
 import io.kotest.core.config.AbstractProjectConfig
-import io.kotest.core.spec.SpecExecutionOrder
-import io.kotest.extensions.junitxml.JunitXmlReporter
 
-import org.ossreviewtoolkit.utils.ort.OrtProxySelector
+import org.ossreviewtoolkit.utils.authentication.OrtProxySelector
+import org.ossreviewtoolkit.utils.common.Os
 
 class ProjectConfig : AbstractProjectConfig() {
-    override val specExecutionOrder = SpecExecutionOrder.Annotated
-
     init {
+        Os.fixupUserHomeProperty()
         OrtProxySelector.install()
     }
-
-    override fun extensions() =
-        listOf(
-            JunitXmlReporter(
-                includeContainers = false,
-                useTestPathAsName = true,
-                outputDir = "test-results/flattened"
-            )
-        )
 }

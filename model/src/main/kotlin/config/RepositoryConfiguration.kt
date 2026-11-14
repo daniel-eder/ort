@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,74 +21,56 @@ package org.ossreviewtoolkit.model.config
 
 import com.fasterxml.jackson.annotation.JsonInclude
 
+import org.ossreviewtoolkit.model.config.snippet.SnippetChoices
+import org.ossreviewtoolkit.model.utils.CurationsFilter
+import org.ossreviewtoolkit.model.utils.ExcludesFilter
+import org.ossreviewtoolkit.model.utils.IncludesFilter
+import org.ossreviewtoolkit.model.utils.LicenseChoicesFilter
+import org.ossreviewtoolkit.model.utils.ResolutionsFilter
 import org.ossreviewtoolkit.utils.ort.ORT_REPO_CONFIG_FILENAME
 
 /**
- * A project specific configuration for ORT which is usually stored in [ORT_REPO_CONFIG_FILENAME] at the root of a
+ * A distribution-specific configuration for ORT which is usually stored in [ORT_REPO_CONFIG_FILENAME] at the root of a
  * repository. It will be included in the analyzer result and can be further processed by the other tools.
  */
 data class RepositoryConfiguration(
-    /**
-     * The configuration for the analyzer. Values in this configuration take precedence over global configuration.
-     */
-    @JsonInclude(value = JsonInclude.Include.NON_NULL)
-    val analyzer: AnalyzerConfiguration? = null,
+    /** The configuration for the analyzer. Values in this configuration take precedence over global configuration. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    val analyzer: RepositoryAnalyzerConfiguration? = null,
 
     /**
      * Defines which parts of the repository will be excluded. Note that excluded parts will still be analyzed and
      * scanned, but related errors will be marked as resolved in the reporter output.
      */
-    @JsonInclude(value = JsonInclude.Include.CUSTOM, valueFilter = ExcludesFilter::class)
+    @JsonInclude(JsonInclude.Include.CUSTOM, valueFilter = ExcludesFilter::class)
     val excludes: Excludes = Excludes(),
 
-    /**
-     * Defines resolutions for issues with this repository.
-     */
-    @JsonInclude(value = JsonInclude.Include.CUSTOM, valueFilter = ResolutionsFilter::class)
+    /** Defines which parts of the repository will be included. */
+    @JsonInclude(JsonInclude.Include.CUSTOM, valueFilter = IncludesFilter::class)
+    val includes: Includes = Includes.EMPTY,
+
+    /** Defines resolutions for issues with this repository. */
+    @JsonInclude(JsonInclude.Include.CUSTOM, valueFilter = ResolutionsFilter::class)
     val resolutions: Resolutions = Resolutions(),
 
     /**
-     * Defines curations for artifacts contained in this repository.
+     * Defines curations for packages used as dependencies by projects in this repository, or curations for license
+     * findings in the source code of a project in this repository.
      */
-    @JsonInclude(value = JsonInclude.Include.CUSTOM, valueFilter = CurationsFilter::class)
+    @JsonInclude(JsonInclude.Include.CUSTOM, valueFilter = CurationsFilter::class)
     val curations: Curations = Curations(),
 
-    /**
-     * Defines configurations for this repository.
-     */
-    @JsonInclude(value = JsonInclude.Include.NON_EMPTY)
+    /** Defines configurations for packages used as dependencies by projects in this repository. */
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
     val packageConfigurations: List<PackageConfiguration> = emptyList(),
 
-    /**
-     * Defines license choices within this repository.
-     */
-    @JsonInclude(value = JsonInclude.Include.CUSTOM, valueFilter = LicenseChoiceFilter::class)
-    val licenseChoices: LicenseChoices = LicenseChoices()
+    /** Defines license choices within this repository. */
+    @JsonInclude(JsonInclude.Include.CUSTOM, valueFilter = LicenseChoicesFilter::class)
+    val licenseChoices: LicenseChoices = LicenseChoices(),
+
+    /** Defines snippet choices for projects in this repository. */
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    val snippetChoices: List<SnippetChoices> = emptyList()
 )
 
-@Suppress("EqualsOrHashCode", "EqualsWithHashCodeExist") // The class is not supposed to be used with hashing.
-private class ExcludesFilter {
-    override fun equals(other: Any?): Boolean =
-        if (other is Excludes) other.paths.isEmpty() && other.scopes.isEmpty() else false
-}
-
-@Suppress("EqualsOrHashCode", "EqualsWithHashCodeExist") // The class is not supposed to be used with hashing.
-private class ResolutionsFilter {
-    override fun equals(other: Any?): Boolean =
-        other is Resolutions &&
-                other.issues.isEmpty() &&
-                other.ruleViolations.isEmpty() &&
-                other.vulnerabilities.isEmpty()
-}
-
-@Suppress("EqualsOrHashCode", "EqualsWithHashCodeExist") // The class is not supposed to be used with hashing.
-private class CurationsFilter {
-    override fun equals(other: Any?): Boolean =
-        other is Curations && other.licenseFindings.isEmpty() && other.packages.isEmpty()
-}
-
-@Suppress("EqualsOrHashCode", "EqualsWithHashCodeExist") // The class is not supposed to be used with hashing.
-private class LicenseChoiceFilter {
-    override fun equals(other: Any?): Boolean =
-        other is LicenseChoices && other.isEmpty()
-}
+fun RepositoryConfiguration?.orEmpty() = this ?: RepositoryConfiguration()

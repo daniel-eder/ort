@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,53 +21,56 @@ package org.ossreviewtoolkit.model
 
 import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.annotation.JsonInclude
+import com.fasterxml.jackson.databind.annotation.JsonSerialize
 
 import java.util.SortedSet
 
-/**
- * Type alias for a [Map] that associates a [DependencyGraphNode] with the nodes representing its dependencies.
- */
+import org.ossreviewtoolkit.model.utils.DependencyGraphEdgeSortedSetConverter
+import org.ossreviewtoolkit.model.utils.DependencyReferenceSortedSetConverter
+import org.ossreviewtoolkit.model.utils.PackageLinkageValueFilter
+
+/** Type alias for a [Map] that associates a [DependencyGraphNode] with the nodes representing its dependencies. */
 typealias NodeDependencies = Map<DependencyGraphNode, List<DependencyGraphNode>>
 
 /**
- * A data class that represents the graph of dependencies of a project.
+ * A data class that represents the graph of dependencies of projects identified by a package manager.
  *
- * This class holds information about a project's scopes and their dependencies in a format that minimizes the
- * consumption of memory. In projects with many scopes there is often a high degree of duplication in the
- * dependencies of the scopes. To avoid this, this class aims to share as many parts of the dependency graph as
- * possible between the different scopes. Ideally, there is only a single dependency graph containing the dependencies
- * used by all scopes. This is not always possibles due to inconsistencies in dependency relations, like a package
- * using different dependencies in different scopes. Then the dependency graph is split into multiple fragments, and
- * each fragment has a consistent view on the dependencies it contains.
+ * This class holds information about project scopes and their dependencies in a format that minimizes the consumption
+ * of memory. In projects with many scopes there is often a high degree of duplication in the dependencies of the
+ * scopes. To avoid this, this class aims to share as many parts of the dependency graph as possible between the
+ * different scopes across projects. Ideally, there is only a single dependency graph containing the dependencies used
+ * by all scopes. This is not always possibles due to inconsistencies in dependency relations, like a package using
+ * different dependencies in different scopes. Then the dependency graph is split into multiple fragments, and each
+ * fragment has a consistent view on the dependencies it contains.
  *
- * When constructing a dependency graph the dependencies are organized as a connected structure of
- * [DependencyReference] objects in memory. Originally, the serialization format of a graph was based on this
- * structure, but that turned out to be not ideal: During serialization, sub graphs referenced from multiple nodes
- * (e.g. libraries with transitive dependencies referenced from multiple projects) get duplicated, which can cause a
- * significant amount of redundancy. Therefore, the data representation has been changed again to a form, which can be
- * serialized without introducing redundancy. It consists of the following elements:
+ * When constructing a dependency graph, the dependencies are organized as a connected structure of
+ * [DependencyReference] objects in memory. Originally, the serialization format of a graph was based on this structure,
+ * but that turned out to be not ideal: During serialization, sub-graphs referenced from multiple nodes (e.g. libraries
+ * with transitive dependencies referenced from multiple projects) get duplicated, which can cause a significant amount
+ * of redundancy. Therefore, the data representation has been changed again to a form which can be serialized without
+ * introducing redundancy. It consists of the following elements:
  *
- * - *packages*: A list with the coordinates of all the packages (free of duplication) that are referenced by the
+ * - [packages]: A list with the coordinates of all the packages (free of duplication) that are referenced by the
  *   graph. This allows extracting the packages directly, but also has the advantage that the package coordinates do
  *   not have to be repeated over and over: All the references to packages are expressed by indices into this list.
- * - *nodes*: An ordered list with the nodes of the dependency graph. A single node represents a package, and
+ * - [nodes]: An ordered list with the nodes of the dependency graph. A single node represents a package, and
  *   therefore has a reference into the list with package coordinates. It can, however, happen that packages occur
  *   multiple times in the graph if they are in different subtrees with different sets of transitive dependencies.
  *   Then there are multiple nodes for the packages affected, and a *fragmentIndex* is used to identify them uniquely.
  *   Nodes also store information about issues of a package and their linkage.
- * - *edges*: Here the structure of the graph comes in. Each edge connects two nodes and represents a directed
- *   *depends-on* relationship. The nodes are referenced by numeric indices into the list of *nodes*.
- * - *scopes*: This is a map that associates the scopes used by projects with their direct dependencies. A single
+ * - [edges]: Here the structure of the graph comes in. Each edge connects two nodes and represents a directed
+ *   *depends-on* relationship. The nodes are referenced by numeric indices into the list of nodes.
+ * - [scopes]: This is a map that associates the scopes used by projects with their direct dependencies. A single
  *   dependency graph contains the dependencies of all the projects processed by a specific package manager.
- *   Therefore, the keys of this map are scope names qualified by the coordinates of a project; which makes them
+ *   Therefore, the keys of this map are scope names qualified by the coordinates of a project, which makes them
  *   unique. The values are references to the nodes in the graph that correspond to the packages the scopes depend on
  *   directly.
  *
- * So to navigate this structure, start with a *scope* and gather the references to its direct dependency *nodes*.
- * Then, by following the *edges* starting from these *nodes*, the set of transitive dependencies can be determined.
- * The numeric indices can be resolved via the *packages* list.
+ * To navigate this structure, start with a scope and gather the references to its direct dependency nodes. Then, by
+ * following the edges starting from these nodes, the set of transitive dependencies can be determined. The numeric
+ * indices can be resolved via the packages list.
  */
-@JsonInclude(JsonInclude.Include.NON_DEFAULT)
+@JsonInclude(JsonInclude.Include.NON_EMPTY)
 data class DependencyGraph(
     /**
      * A list with the identifiers of the packages that appear in the dependency graph. This list is used to resolve
@@ -94,13 +97,14 @@ data class DependencyGraph(
      * list, there can be multiple nodes for a single package. The order of nodes in this list is relevant; the
      * edges of the graph reference their nodes by numeric indices.
      */
-    val nodes: List<DependencyGraphNode>? = null,
+    val nodes: List<DependencyGraphNode> = emptyList(),
 
     /**
-     * A list with the edges of this dependency graph. By traversing the edges, the dependencies of packages can be
+     * A set with the edges of this dependency graph. By traversing the edges, the dependencies of packages can be
      * determined.
      */
-    val edges: List<DependencyGraphEdge>? = null
+    @JsonSerialize(converter = DependencyGraphEdgeSortedSetConverter::class)
+    val edges: Set<DependencyGraphEdge> = emptySet()
 ) {
     companion object {
         /**
@@ -108,14 +112,6 @@ data class DependencyGraph(
          * just has to be well-defined.
          */
         val DEPENDENCY_REFERENCE_COMPARATOR = compareBy<DependencyReference>({ it.pkg }, { it.fragment })
-
-        /**
-         * Return a name for the given [scope][scopeName] that is qualified with parts of the identifier of the given
-         * [project]. This is used to ensure that the scope names are unique when constructing a dependency graph from
-         * multiple projects.
-         */
-        fun qualifyScope(project: Project, scopeName: String): String =
-            qualifyScope(project.id, scopeName)
 
         /**
          * Return a name for the given [scope][scopeName] that is qualified with parts of the given [projectId]. This
@@ -135,9 +131,7 @@ data class DependencyGraph(
             scopeName.split(':', limit = 4).getOrElse(3) { scopeName }
     }
 
-    /**
-     * A mapping that allows fast access to the dependencies of a node in this graph.
-     */
+    /** A mapping that allows fast access to the dependencies of a node in this graph. */
     @get:JsonIgnore
     val dependencies: NodeDependencies by lazy { constructNodeDependencies() }
 
@@ -152,28 +146,22 @@ data class DependencyGraph(
      * Transform the data stored in this object to the classical layout of dependency information, which is a set of
      * [Scope]s referencing the packages they depend on.
      */
-    fun createScopes(): SortedSet<Scope> = createScopesFor(scopes, unqualify = false)
+    fun createScopes(): Set<Scope> = createScopesFor(scopes)
 
     /**
      * Transform a subset of the data stored in this object to the classical layout of dependency information. This is
-     * analogous to [createScopes], but only the provided [scopeNames] are taken into account. If [unqualify] is
-     * *true*, remove qualifiers from scope names before constructing the [Scope]s.
+     * analogous to [createScopes], but only the provided [scopeNames] are taken into account.
      */
-    fun createScopes(scopeNames: Set<String>, unqualify: Boolean = true): SortedSet<Scope> =
-        createScopesFor(scopes.filterKeys { it in scopeNames }, unqualify)
+    fun createScopes(scopeNames: Set<String>): Set<Scope> = createScopesFor(scopes.filterKeys { it in scopeNames })
 
-    /**
-     * Convert the given [map] with scope information to a set of [Scope]s. [Optionally][unqualify] remove qualifiers
-     * from scope names.
-     */
-    private fun createScopesFor(map: Map<String, List<RootDependencyIndex>>, unqualify: Boolean): SortedSet<Scope> =
-        map.mapTo(sortedSetOf()) { entry ->
-            val dependencies = entry.value.mapTo(sortedSetOf()) { index ->
+    /** Convert the given [map] with scope information to a set of [Scope]s. */
+    private fun createScopesFor(map: Map<String, List<RootDependencyIndex>>): Set<Scope> =
+        map.mapTo(mutableSetOf()) { entry ->
+            val dependencies = entry.value.mapTo(mutableSetOf()) { index ->
                 referenceMapping[index.toKey()] ?: error("Could not resolve dependency index $index.")
             }
 
-            val scopeName = if (unqualify) unqualifyScope(entry.key) else entry.key
-            Scope(scopeName, dependencies)
+            Scope(unqualifyScope(entry.key), dependencies)
         }
 
     /**
@@ -182,7 +170,7 @@ data class DependencyGraph(
      */
     private fun constructReferenceMapping(): Map<String, PackageReference> {
         val refMapping = mutableMapOf<String, PackageReference>()
-        val allNodes = nodes ?: scopeRoots.map(DependencyReference::toGraphNode)
+        val allNodes = nodes.takeUnless { it.isEmpty() } ?: scopeRoots.map(DependencyReference::toGraphNode)
 
         allNodes.forEach { constructReferenceTree(it, refMapping) }
 
@@ -199,7 +187,7 @@ data class DependencyGraph(
     ): PackageReference {
         val indexKey = RootDependencyIndex.generateKey(node.pkg, node.fragment)
         return refMapping.getOrPut(indexKey) {
-            val refDependencies = dependencies[node].orEmpty().mapTo(sortedSetOf()) {
+            val refDependencies = dependencies[node].orEmpty().mapTo(mutableSetOf()) {
                 constructReferenceTree(it, refMapping)
             }
 
@@ -212,22 +200,18 @@ data class DependencyGraph(
         }
     }
 
-    /**
-     * Construct a mapping that allows fast navigation from a graph node to its dependencies.
-     */
+    /** Construct a mapping that allows fast navigation from a graph node to its dependencies. */
     private fun constructNodeDependencies(): NodeDependencies =
         when {
-            nodes != null && edges != null -> constructNodeDependenciesFromGraph(nodes, edges)
+            nodes.isNotEmpty() -> constructNodeDependenciesFromGraph(nodes, edges)
             else -> constructNodeDependenciesFromScopeRoots(scopeRoots)
         }
 
-    /**
-     * Return a map of all de-duplicated [OrtIssue]s associated by [Identifier].
-     */
-    fun collectIssues(): Map<Identifier, Set<OrtIssue>> {
-        val collectedIssues = mutableMapOf<Identifier, MutableSet<OrtIssue>>()
+    /** Return a map of all de-duplicated [Issue]s associated by [Identifier]. */
+    fun collectIssues(): Map<Identifier, Set<Issue>> {
+        val collectedIssues = mutableMapOf<Identifier, MutableSet<Issue>>()
 
-        fun addIssues(pkg: Int, issues: Collection<OrtIssue>) {
+        fun addIssues(pkg: Int, issues: Collection<Issue>) {
             if (issues.isNotEmpty()) {
                 collectedIssues.getOrPut(packages[pkg]) { mutableSetOf() } += issues
             }
@@ -242,7 +226,7 @@ data class DependencyGraph(
             addIssues(ref)
         }
 
-        nodes?.forEach { node ->
+        nodes.forEach { node ->
             addIssues(node.pkg, node.issues)
         }
 
@@ -279,9 +263,7 @@ data class RootDependencyIndex(
         fun generateKey(root: Int, fragment: Int): String = "$root.$fragment"
     }
 
-    /**
-     * Generate a string key to represent this index.
-     */
+    /** Generate a string key to represent this index. */
     fun toKey(): String = generateKey(root, fragment)
 }
 
@@ -313,20 +295,19 @@ class DependencyReference(
     /**
      * A set with the references to the dependencies of this dependency. That way a tree-like structure is established.
      */
-    val dependencies: SortedSet<DependencyReference> = sortedSetOf(),
+    @JsonSerialize(contentConverter = DependencyReferenceSortedSetConverter::class)
+    val dependencies: Set<DependencyReference> = emptySet(),
 
     /**
-     * The type of linkage used for the referred package from its dependent package. As most of our supported
+     * The type of linkage used for the referred package from its dependent package. As most of ORT's supported
      * package managers / languages only support dynamic linking or at least default to it, also use that as the
-     * default value here to not blow up our result files.
+     * default value here to not blow up ORT result files.
      */
-    @JsonInclude(value = JsonInclude.Include.CUSTOM, valueFilter = PackageLinkageValueFilter::class)
+    @JsonInclude(JsonInclude.Include.CUSTOM, valueFilter = PackageLinkageValueFilter::class)
     val linkage: PackageLinkage = PackageLinkage.DYNAMIC,
 
-    /**
-     * A list of [OrtIssue]s that occurred handling this dependency.
-     */
-    val issues: List<OrtIssue> = emptyList()
+    /** A list of [Issue]s that occurred handling this dependency. */
+    val issues: List<Issue> = emptyList()
 ) : Comparable<DependencyReference> {
     /**
      * Define an order on [DependencyReference] instances. Instances are ordered by their indices and fragment indices.
@@ -361,17 +342,15 @@ data class DependencyGraphNode(
     val fragment: Int = 0,
 
     /**
-     * The type of linkage used for the referred package from its dependent package. As most of our supported
+     * The type of linkage used for the referred package from its dependent package. As most of ORT's supported
      * package managers / languages only support dynamic linking or at least default to it, also use that as the
-     * default value here to not blow up our result files.
+     * default value here to not blow up ORT result files.
      */
-    @JsonInclude(value = JsonInclude.Include.CUSTOM, valueFilter = PackageLinkageValueFilter::class)
+    @JsonInclude(JsonInclude.Include.CUSTOM, valueFilter = PackageLinkageValueFilter::class)
     val linkage: PackageLinkage = PackageLinkage.DYNAMIC,
 
-    /**
-     * A list of [OrtIssue]s that occurred handling this dependency.
-     */
-    val issues: List<OrtIssue> = emptyList()
+    /** A list of [Issue]s that occurred handling this dependency. */
+    val issues: List<Issue> = emptyList()
 )
 
 /**
@@ -388,18 +367,14 @@ data class DependencyGraphEdge(
     val to: Int
 )
 
-/**
- * Convert this [DependencyReference] to a [DependencyGraphNode].
- */
+/** Convert this [DependencyReference] to a [DependencyGraphNode]. */
 private fun DependencyReference.toGraphNode() = DependencyGraphNode(pkg, fragment, linkage, issues)
 
-/**
- * Construct a mapping of dependencies based on the given [roots].
- */
-private fun constructNodeDependenciesFromScopeRoots(roots: SortedSet<DependencyReference>): NodeDependencies {
+/** Construct a mapping of dependencies based on the given [roots]. */
+private fun constructNodeDependenciesFromScopeRoots(roots: Set<DependencyReference>): NodeDependencies {
     val mapping = mutableMapOf<DependencyGraphNode, List<DependencyGraphNode>>()
 
-    fun construct(refs: SortedSet<DependencyReference>) {
+    fun construct(refs: Set<DependencyReference>) {
         refs.forEach { ref ->
             val node = ref.toGraphNode()
             if (node !in mapping) {
@@ -413,12 +388,10 @@ private fun constructNodeDependenciesFromScopeRoots(roots: SortedSet<DependencyR
     return mapping
 }
 
-/**
- * Construct a mapping of dependencies based on the lists of graph [nodes] and [edges].
- */
+/** Construct a mapping of dependencies based on the lists of graph [nodes] and [edges]. */
 private fun constructNodeDependenciesFromGraph(
     nodes: List<DependencyGraphNode>,
-    edges: List<DependencyGraphEdge>
+    edges: Set<DependencyGraphEdge>
 ): NodeDependencies {
     val mapping = mutableMapOf<DependencyGraphNode, MutableList<DependencyGraphNode>>()
 

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,32 +24,25 @@ import com.fasterxml.jackson.annotation.JsonInclude
 import org.ossreviewtoolkit.utils.common.FileMatcher
 
 /**
- * Defines paths which should be excluded. Each file that is matched by the [glob][pattern] is marked as excluded. If a
- * project definition file is matched by the [pattern] the whole project is excluded. For details about the glob syntax
- * see the [official documentation](https://docs.oracle.com/javase/tutorial/essential/io/fileOps.html#glob).
+ * Defines paths which should be excluded. Each file or directory that is matched by the [glob][pattern] is marked as
+ * excluded. If a project definition file is matched by the [pattern], the whole project is excluded. For details about
+ * the glob syntax see the [FileMatcher] implementation.
  */
 data class PathExclude(
-    /**
-     * A glob to match the path of the project definition file, relative to the root of the repository.
-     */
+    /** A glob to match the path of the project definition file, relative to the root of the repository. */
     val pattern: String,
 
-    /**
-     * The reason why the project is excluded, out of a predefined choice.
-     */
+    /** The reason why the project is excluded, out of a predefined choice. */
     val reason: PathExcludeReason,
 
-    /**
-     * A comment to further explain why the [reason] is applicable here.
-     */
+    /** A comment to further explain why the [reason] is applicable here. */
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
     val comment: String = ""
 ) {
-    /**
-     * Return true if and only if this [PathExclude] matches the given [path].
-     */
-    fun matches(path: String) = FileMatcher.match(
-        pattern = pattern.removePrefix("./"),
-        path = path
-    )
+    /** Return true if this [PathExclude] matches the given [path]. */
+    fun matches(path: String) =
+        FileMatcher.matches(
+            pattern = pattern.removePrefix("./"),
+            path = path
+        )
 }

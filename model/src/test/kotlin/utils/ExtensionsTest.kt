@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,8 @@
 package org.ossreviewtoolkit.model.utils
 
 import io.kotest.core.spec.style.WordSpec
+import io.kotest.matchers.nulls.beNull
+import io.kotest.matchers.should
 import io.kotest.matchers.shouldBe
 
 class ExtensionsTest : WordSpec({
@@ -27,18 +29,18 @@ class ExtensionsTest : WordSpec({
         "return the manifest path" {
             "https://example.com/repo.git?manifest=default.xml".parseRepoManifestPath() shouldBe "default.xml"
             "https://example.com/repo.git?other=param&manifest=default.xml".parseRepoManifestPath() shouldBe
-                    "default.xml"
+                "default.xml"
         }
 
         "return null if no manifest is found" {
-            "https://example.com/repo.git".parseRepoManifestPath() shouldBe null
-            "https://example.com/repo.git?other=param".parseRepoManifestPath() shouldBe null
-            "https://example.com/repo.git?manifest=".parseRepoManifestPath() shouldBe null
+            "https://example.com/repo.git".parseRepoManifestPath() should beNull()
+            "https://example.com/repo.git?other=param".parseRepoManifestPath() should beNull()
+            "https://example.com/repo.git?manifest=".parseRepoManifestPath() should beNull()
         }
 
         "return null if the string is no valid URI" {
-            "^invalid-uri".parseRepoManifestPath() shouldBe null
-            "^invalid-uri?manifest=default.xml".parseRepoManifestPath() shouldBe null
+            "^invalid-uri".parseRepoManifestPath() should beNull()
+            "^invalid-uri?manifest=default.xml".parseRepoManifestPath() should beNull()
         }
     }
 })

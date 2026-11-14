@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2022 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,8 @@
  * License-Filename: LICENSE
  */
 
+package org.ossreviewtoolkit.clients.fossid
+
 import com.github.tomakehurst.wiremock.WireMockServer
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration
 
@@ -25,11 +27,10 @@ import io.kotest.matchers.collections.shouldContainExactly
 import io.kotest.matchers.collections.shouldHaveSize
 import io.kotest.matchers.nulls.shouldNotBeNull
 
-import org.ossreviewtoolkit.clients.fossid.FossIdRestService
-import org.ossreviewtoolkit.clients.fossid.FossIdServiceWithVersion
-import org.ossreviewtoolkit.clients.fossid.checkResponse
-import org.ossreviewtoolkit.clients.fossid.createIgnoreRule
-import org.ossreviewtoolkit.clients.fossid.listIgnoreRules
+import io.mockk.clearAllMocks
+import io.mockk.coEvery
+import io.mockk.mockkObject
+
 import org.ossreviewtoolkit.clients.fossid.model.rules.IgnoreRule
 import org.ossreviewtoolkit.clients.fossid.model.rules.RuleScope
 import org.ossreviewtoolkit.clients.fossid.model.rules.RuleType
@@ -40,17 +41,24 @@ class FossIdRulesTest : StringSpec({
     val server = WireMockServer(
         WireMockConfiguration.options()
             .dynamicPort()
-            .usingFilesUnderDirectory("src/test/assets/rules")
+            .usingFilesUnderClasspath("rules")
     )
     lateinit var service: FossIdServiceWithVersion
 
     beforeSpec {
         server.start()
-        service = FossIdRestService.createService("http://localhost:${server.port()}")
+
+        mockkObject(FossIdServiceWithVersion)
+        coEvery { FossIdServiceWithVersion.create(any()) } answers {
+            VersionedFossIdService2021dot2(firstArg(), "2021.2.2")
+        }
+
+        service = FossIdRestService.create("http://localhost:${server.port()}")
     }
 
     afterSpec {
         server.stop()
+        clearAllMocks()
     }
 
     beforeTest {
@@ -58,10 +66,10 @@ class FossIdRulesTest : StringSpec({
     }
 
     "Ignore rules can be listed" {
-        service.listIgnoreRules("", "", SCAN_CODE).shouldNotBeNull().run {
+        service.listIgnoreRules("", "", SCAN_CODE) shouldNotBeNull {
             checkResponse("list ignore rules")
 
-            data.shouldNotBeNull().run {
+            data shouldNotBeNull {
                 shouldHaveSize(3)
 
                 shouldContainExactly(

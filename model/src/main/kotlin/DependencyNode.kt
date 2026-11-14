@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,7 +45,7 @@ interface DependencyNode {
     val linkage: PackageLinkage
 
     /** A list with issues that occurred while resolving this dependency. */
-    val issues: List<OrtIssue>
+    val issues: List<Issue>
 
     /**
      * Visit the direct dependencies of this [DependencyNode] by calling the specified [block] with a sequence of all

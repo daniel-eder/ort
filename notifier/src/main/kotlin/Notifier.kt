@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ import java.time.Instant
 
 import kotlin.script.experimental.api.KotlinType
 import kotlin.script.experimental.api.ScriptEvaluationConfiguration
+import kotlin.script.experimental.api.SourceCode
 import kotlin.script.experimental.api.constructorArgs
 import kotlin.script.experimental.api.providedProperties
 import kotlin.script.experimental.api.scriptsInstancesSharing
@@ -35,13 +36,14 @@ import org.ossreviewtoolkit.model.utils.DefaultResolutionProvider
 import org.ossreviewtoolkit.model.utils.ResolutionProvider
 import org.ossreviewtoolkit.notifier.modules.JiraNotifier
 import org.ossreviewtoolkit.notifier.modules.MailNotifier
-import org.ossreviewtoolkit.utils.scripting.ScriptRunner
+import org.ossreviewtoolkit.utils.script.NotificationsScriptTemplate
+import org.ossreviewtoolkit.utils.script.ScriptRunner
 
 class Notifier(
     ortResult: OrtResult = OrtResult.EMPTY,
     config: NotifierConfiguration = NotifierConfiguration(),
     resolutionProvider: ResolutionProvider = DefaultResolutionProvider()
-) : ScriptRunner() {
+) : ScriptRunner<NotifierRun>() {
     private val customProperties = buildMap {
         config.mail?.let { put("mailClient", MailNotifier(it)) }
         config.jira?.let { put("jiraClient", JiraNotifier(it)) }
@@ -60,9 +62,9 @@ class Notifier(
         providedProperties(customProperties)
     }
 
-    fun run(script: String): NotifierRun {
+    override fun runScript(script: SourceCode): NotifierRun {
         val startTime = Instant.now()
-        runScript(script)
+        run(script)
         val endTime = Instant.now()
 
         return NotifierRun(startTime, endTime)

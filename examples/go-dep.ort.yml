@@ -1,3 +1,0 @@
-excludes: {}
-# dep only has one scope named 'install' thus no default scope based
-# excludes can be defined.

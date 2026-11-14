@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2020 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,5 +26,8 @@ enum class MatchType {
     IGNORED,
     INTAKE,
     NONE,
-    PARTIAL
+    PARTIAL;
+
+    /** Test if the match type is a valid one i.e. the scanner can work with it. */
+    fun isValidType() = this == FULL || this == PARTIAL
 }

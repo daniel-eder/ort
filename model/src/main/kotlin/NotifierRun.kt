@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,17 +21,11 @@ package org.ossreviewtoolkit.model
 
 import java.time.Instant
 
-/**
- * The summary of a single run of the notifier.
- */
+/** The summary of a single run of the notifier. */
 data class NotifierRun(
-    /**
-     * The [Instant] the notifier was started.
-     */
+    /** The [Instant] the notifier was started. */
     val startTime: Instant,
 
-    /**
-     * The [Instant] the notifier has finished.
-     */
+    /** The [Instant] the notifier has finished. */
     val endTime: Instant
 )

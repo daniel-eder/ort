@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,10 +24,13 @@ import ch.qos.logback.classic.Logger
 
 import com.github.ajalt.clikt.completion.completionOption
 import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.core.Context
+import com.github.ajalt.clikt.core.PrintMessage
 import com.github.ajalt.clikt.core.context
+import com.github.ajalt.clikt.core.main
 import com.github.ajalt.clikt.core.subcommands
-import com.github.ajalt.clikt.output.CliktHelpFormatter
-import com.github.ajalt.clikt.output.HelpFormatter
+import com.github.ajalt.clikt.core.terminal
+import com.github.ajalt.clikt.output.MordantHelpFormatter
 import com.github.ajalt.clikt.parameters.options.associate
 import com.github.ajalt.clikt.parameters.options.convert
 import com.github.ajalt.clikt.parameters.options.default
@@ -36,64 +39,73 @@ import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.switch
 import com.github.ajalt.clikt.parameters.options.versionOption
 import com.github.ajalt.clikt.parameters.types.file
+import com.github.ajalt.mordant.rendering.TextColors
+import com.github.ajalt.mordant.rendering.Theme
+import com.github.ajalt.mordant.rendering.VerticalAlign
+import com.github.ajalt.mordant.rendering.Widget
+import com.github.ajalt.mordant.table.ColumnWidth
+import com.github.ajalt.mordant.table.grid
+import com.github.ajalt.mordant.terminal.Terminal
 
 import java.io.File
 
 import kotlin.system.exitProcess
 
-import org.ossreviewtoolkit.cli.commands.*
-import org.ossreviewtoolkit.cli.utils.logger
-import org.ossreviewtoolkit.model.config.LicenseFilenamePatterns
+import org.ossreviewtoolkit.model.config.LicenseFilePatterns
 import org.ossreviewtoolkit.model.config.OrtConfiguration
+import org.ossreviewtoolkit.plugins.api.PluginConfig
+import org.ossreviewtoolkit.plugins.commands.api.OrtCommandFactory
+import org.ossreviewtoolkit.utils.common.EnvironmentVariableFilter
+import org.ossreviewtoolkit.utils.common.MaskedString
 import org.ossreviewtoolkit.utils.common.Os
+import org.ossreviewtoolkit.utils.common.div
 import org.ossreviewtoolkit.utils.common.expandTilde
+import org.ossreviewtoolkit.utils.common.mebibytes
+import org.ossreviewtoolkit.utils.common.replaceCredentialsInUri
 import org.ossreviewtoolkit.utils.ort.Environment
-import org.ossreviewtoolkit.utils.ort.ORT_CONFIG_DIR_ENV_NAME
 import org.ossreviewtoolkit.utils.ort.ORT_CONFIG_FILENAME
-import org.ossreviewtoolkit.utils.ort.ORT_DATA_DIR_ENV_NAME
+import org.ossreviewtoolkit.utils.ort.ORT_DECLARED_LICENSE_MAPPING_FILENAME
 import org.ossreviewtoolkit.utils.ort.ORT_NAME
+import org.ossreviewtoolkit.utils.ort.ORT_SIMPLE_LICENSE_MAPPING_FILENAME
+import org.ossreviewtoolkit.utils.ort.OkHttpClientHelper
 import org.ossreviewtoolkit.utils.ort.ortConfigDirectory
-import org.ossreviewtoolkit.utils.ort.ortDataDirectory
 import org.ossreviewtoolkit.utils.ort.printStackTrace
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxDeclaredLicenseMapper
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxSimpleLicenseMapper
 
 import org.slf4j.LoggerFactory
 
-/**
- * Helper class for mutually exclusive command line options of different types.
- */
-sealed interface GroupTypes {
-    data class FileType(val file: File) : GroupTypes
-    data class StringType(val string: String) : GroupTypes
-}
+private const val REQUIRED_OPTION_MARKER = "*"
 
-/**
- * Helper class for collecting options that can be passed to subcommands.
- */
-data class GlobalOptions(
-    val config: OrtConfiguration,
-    val forceOverwrite: Boolean
-)
+// A priority value that is higher than any Clikt built-in value for allocating width.
+private const val HIGHEST_PRIORITY_FOR_WIDTH = 100
 
-/**
- * The entry point for the application with [args] being the list of arguments.
- */
+private val ORT_LOGO = """
+     ______________________________
+    /        \_______   \__    ___/
+    |    |   | |       _/ |    |
+    |    |   | |    |   \ |    |
+    \________/ |____|___/ |____|
+""".trimIndent()
+
+/** The entry point for the application with [args] being the list of arguments. */
 fun main(args: Array<String>) {
     Os.fixupUserHomeProperty()
     OrtMain().main(args)
     exitProcess(0)
 }
 
-class OrtMain : CliktCommand(name = ORT_NAME, invokeWithoutSubcommand = true) {
+class OrtMain : CliktCommand(ORT_NAME) {
     private val configFile by option("--config", "-c", help = "The path to a configuration file.")
         .convert { it.expandTilde() }
         .file(mustExist = true, canBeFile = true, canBeDir = false, mustBeWritable = false, mustBeReadable = true)
-        .default(ortConfigDirectory.resolve(ORT_CONFIG_FILENAME))
+        .default(ortConfigDirectory / ORT_CONFIG_FILENAME)
 
     private val logLevel by option(help = "Set the verbosity level of log output.").switch(
-        "--debug" to Level.DEBUG,
         "--error" to Level.ERROR,
+        "--warn" to Level.WARN,
         "--info" to Level.INFO,
-        "--warn" to Level.WARN
+        "--debug" to Level.DEBUG
     ).default(Level.WARN)
 
     private val stacktrace by option(help = "Print out the stacktrace for all exceptions.").flag()
@@ -101,13 +113,8 @@ class OrtMain : CliktCommand(name = ORT_NAME, invokeWithoutSubcommand = true) {
     private val configArguments by option(
         "-P",
         help = "Override a key-value pair in the configuration file. For example: " +
-                "-P ort.scanner.storages.postgres.schema=testSchema"
+            "-P ort.scanner.storages.postgres.connection.schema=testSchema"
     ).associate()
-
-    private val forceOverwrite by option(
-        "--force-overwrite",
-        help = "Overwrite any output files if they already exist."
-    ).flag()
 
     private val helpAll by option(
         "--help-all",
@@ -116,54 +123,16 @@ class OrtMain : CliktCommand(name = ORT_NAME, invokeWithoutSubcommand = true) {
 
     private val env = Environment()
 
-    private inner class OrtHelpFormatter : CliktHelpFormatter(requiredOptionMarker = "*", showDefaultValues = true) {
-        var headerShownBefore = false
-
-        override fun formatHelp(
-            prolog: String,
-            epilog: String,
-            parameters: List<HelpFormatter.ParameterHelp>,
-            programName: String
-        ) =
-            buildString {
-                // The header only needs to be shown for the root command, as for subcommands the header was already
-                // shown by the root command's run(). However, only show it if it has not been shown before as part of
-                // "--help-all" (note that we cannot safely access the "helpAll" variable here as it might not have been
-                // initialized yet.)
-                val isRootCommand = currentContext.invokedSubcommand == null
-                if (isRootCommand && !headerShownBefore) {
-                    appendLine(getOrtHeader(env.ortVersion))
-                    headerShownBefore = true
-                }
-
-                appendLine(super.formatHelp(prolog, epilog, parameters, programName))
-                appendLine()
-                appendLine("* denotes required options.")
-            }
-    }
-
     init {
         completionOption()
 
         context {
-            expandArgumentFiles = false
-            helpFormatter = OrtHelpFormatter()
+            helpFormatter = { MordantHelpFormatter(context = it, REQUIRED_OPTION_MARKER, showDefaultValues = true) }
+            terminal = Terminal(nonInteractiveWidth = 200)
         }
 
-        subcommands(
-            AdvisorCommand(),
-            AnalyzerCommand(),
-            ConfigCommand(),
-            DownloaderCommand(),
-            EvaluatorCommand(),
-            NotifierCommand(),
-            ReporterCommand(),
-            RequirementsCommand(),
-            ScannerCommand(),
-            UploadCurationsCommand(),
-            UploadResultToPostgresCommand(),
-            UploadResultToSw360Command()
-        )
+        // Pass an empty PluginConfig here as commands are not configurable.
+        subcommands(OrtCommandFactory.ALL.map { (_, factory) -> factory.create(PluginConfig.EMPTY) })
 
         versionOption(
             version = env.ortVersion,
@@ -173,57 +142,153 @@ class OrtMain : CliktCommand(name = ORT_NAME, invokeWithoutSubcommand = true) {
         )
     }
 
+    override val invokeWithoutSubcommand = true
+
+    override fun helpEpilog(context: Context) = "$REQUIRED_OPTION_MARKER denotes required options."
+
     override fun run() {
+        // This is somewhat dirty: ORT uses Log4j as the logging API (because of its nice Kotlin API), but Logback as
+        // the implementation (for its robustness). The Log4j API does not provide a way to get the root logger.
+        // However, the SLF4J API does, and knowing it is Logback the root level can be set. That is why ORT's CLI
+        // additionally depends on the SLF4J API, just to be able to set the root log level.
         val rootLogger = LoggerFactory.getLogger(Logger.ROOT_LOGGER_NAME) as Logger
         rootLogger.level = logLevel
-
-        logger.debug { "Used command line arguments: ${currentContext.originalArgv}" }
 
         // Make the parameter globally available.
         printStackTrace = stacktrace
 
         // Make options available to subcommands and apply static configuration.
-        val ortConfiguration = OrtConfiguration.load(configArguments, configFile)
-        currentContext.findOrSetObject { GlobalOptions(ortConfiguration, forceOverwrite) }
-        LicenseFilenamePatterns.configure(ortConfiguration.licenseFilePatterns)
+        val ortConfig = OrtConfiguration.load(args = configArguments, file = configFile)
+        currentContext.findOrSetObject { ortConfig }
+
+        configureDeclaredLicenseMapper(ortConfig)
+        configureSimpleLicenseMapper(ortConfig)
+
+        LicenseFilePatterns.configure(ortConfig.licenseFilePatterns)
+
+        EnvironmentVariableFilter.reset(
+            ortConfig.deniedProcessEnvironmentVariablesSubstrings,
+            ortConfig.allowedProcessEnvironmentVariableNames
+        )
+
+        OkHttpClientHelper.enablePreemptiveAuthentication = ortConfig.downloader.enablePreemptiveAuthentication
 
         if (helpAll) {
             registeredSubcommands().forEach {
-                println(it.getFormattedHelp())
+                echo(it.getFormattedHelp())
+                echo()
             }
         } else {
-            println(getOrtHeader(env.ortVersion))
+            echo(getOrtHeader(env.ortVersion))
+            echo("Looking for ORT configuration in the following file:")
+            echo("\t" + configFile.absolutePath + " (does not exist)".takeIf { !configFile.exists() }.orEmpty())
+            echo()
         }
     }
 
-    private fun getOrtHeader(version: String): String {
-        val variables = mutableListOf(
-            "$ORT_CONFIG_DIR_ENV_NAME = $ortConfigDirectory",
-            "$ORT_DATA_DIR_ENV_NAME = $ortDataDirectory"
-        )
+    private fun getOrtHeader(version: String): Widget =
+        grid {
+            column(0) {
+                width = ColumnWidth(width = null, expandWeight = null, priority = HIGHEST_PRIORITY_FOR_WIDTH)
+            }
 
-        env.variables.entries.mapTo(variables) { (key, value) -> "$key = $value" }
+            column(1) { verticalAlign = VerticalAlign.BOTTOM }
+            padding { bottom = 1 }
 
-        val commandName = currentContext.invokedSubcommand?.commandName
-        val command = commandName?.let { " '$commandName'" }.orEmpty()
+            row {
+                cell(ORT_LOGO) { style = TextColors.cyan }
 
-        val header = mutableListOf<String>()
-        val maxMemInMib = env.maxMemory / (1024 * 1024)
+                val commandName = currentContext.invokedSubcommand?.commandName
+                val command = commandName?.let { " '${TextColors.cyan(commandName)}'" }.orEmpty()
 
-        """
-            ________ _____________________
-            \_____  \\______   \__    ___/ the OSS Review Toolkit, version $version.
-             /   |   \|       _/ |    |
-            /    |    \    |   \ |    |    Running$command under Java ${env.javaVersion} on ${env.os} with
-            \_______  /____|_  / |____|    ${env.processors} CPUs and a maximum of $maxMemInMib MiB of memory.
-                    \/       \/
-        """.trimIndent().lines().mapTo(header) { it.trimEnd() }
+                val userName = System.getProperty("user.name").takeUnless { it == "?" } ?: Os.userHomeDirectory.name
+                val user = userName?.let { " as '${Theme.Default.warning(userName)}'" }.orEmpty()
 
-        if (variables.isNotEmpty()) {
-            header += "Environment variables:"
-            header += variables
+                val maxMemInMib = env.maxMemory / 1.mebibytes
+
+                cell(
+                    """
+                        The OSS Review Toolkit, version ${Theme.Default.info(version)},
+                        built with JDK ${env.buildJdk}, running under Java ${env.javaVersion}.
+                        Executing$command$user on ${env.os}
+                        with ${env.processors} CPUs and a maximum of $maxMemInMib MiB of memory.
+                    """.trimIndent()
+                )
+            }
+
+            row {
+                val content = mutableListOf("Environment variables:")
+
+                env.variables.mapTo(content) { (key, value) ->
+                    val safeValue = value.replaceCredentialsInUri(MaskedString.DEFAULT_MASK)
+                    "${Theme.Default.info(key)} = ${Theme.Default.warning(safeValue)}"
+                }
+
+                cell(content.joinToString("\n")) { columnSpan = 2 }
+            }
         }
-
-        return header.joinToString("\n", postfix = "\n")
-    }
 }
+
+private fun configureDeclaredLicenseMapper(ortConfig: OrtConfiguration) {
+    val customMappingFile = ortConfig.declaredLicenseMappingFile?.let { File(it) }
+        ?: ortConfigDirectory.resolve(ORT_DECLARED_LICENSE_MAPPING_FILENAME).takeIf { it.isFile }
+
+    val customMapping = customMappingFile?.readDeclaredLicenseMapping()
+
+    SpdxDeclaredLicenseMapper.configure(
+        buildMap {
+            if (ortConfig.enableRiskyLicenseMappings) {
+                putAll(SpdxDeclaredLicenseMapper.AMBIGUOUS_MAPPING)
+            }
+
+            putAll(SpdxDeclaredLicenseMapper.MAPPING)
+
+            // Put the custom mapping last to allow the user to override built-in entries.
+            if (customMapping != null) {
+                putAll(customMapping)
+            }
+        }
+    )
+}
+
+private fun File.readDeclaredLicenseMapping() =
+    runCatching {
+        SpdxDeclaredLicenseMapper.readMapping(this)
+    }.getOrElse { e ->
+        throw PrintMessage(
+            message = "Could not read the declared license mapping from '$absolutePath': ${e.stackTraceToString()}.",
+            statusCode = 1
+        )
+    }
+
+private fun configureSimpleLicenseMapper(ortConfig: OrtConfiguration) {
+    val customMappingFile = ortConfig.simpleLicenseMappingFile?.let { File(it) }
+        ?: ortConfigDirectory.resolve(ORT_SIMPLE_LICENSE_MAPPING_FILENAME).takeIf { it.isFile }
+
+    val customMapping = customMappingFile?.readSimpleLicenseMapping()
+
+    SpdxSimpleLicenseMapper.configure(
+        buildMap {
+            if (ortConfig.enableRiskyLicenseMappings) {
+                putAll(SpdxSimpleLicenseMapper.AMBIGUOUS_SIMPLE_MAPPING)
+            }
+
+            putAll(SpdxSimpleLicenseMapper.SIMPLE_MAPPING)
+            putAll(SpdxSimpleLicenseMapper.DEPRECATED_MAPPING)
+
+            if (customMapping != null) {
+                putAll(customMapping)
+            }
+        }
+    )
+}
+
+private fun File.readSimpleLicenseMapping() =
+    runCatching {
+        SpdxSimpleLicenseMapper.readMapping(this)
+    }.getOrElse { e ->
+        throw PrintMessage(
+            message = "Could not read the simple license mapping from '$absolutePath': ${e.stackTraceToString()}.",
+            statusCode = 1
+        )
+    }

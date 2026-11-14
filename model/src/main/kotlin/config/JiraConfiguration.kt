@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,18 +20,12 @@
 package org.ossreviewtoolkit.model.config
 
 data class JiraConfiguration(
-    /**
-     * The host for the Jira instance.
-     */
-    val host: String = "localhost",
+    /** The host for the Jira instance. */
+    val host: String = "http://localhost",
 
-    /**
-     * The username used for the authentication.
-     */
+    /** The username used for the authentication. */
     val username: String = "",
 
-    /**
-     * The password used for the authentication.
-     */
+    /** The password used for the authentication. */
     val password: String = ""
 )

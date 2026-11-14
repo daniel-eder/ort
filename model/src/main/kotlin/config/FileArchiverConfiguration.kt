@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2019 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,54 +19,53 @@
 
 package org.ossreviewtoolkit.model.config
 
-import org.apache.logging.log4j.kotlin.Logging
+import com.fasterxml.jackson.annotation.JsonInclude
+
+import org.apache.logging.log4j.kotlin.logger
 
 import org.ossreviewtoolkit.model.utils.DatabaseUtils
 import org.ossreviewtoolkit.model.utils.FileArchiver
-import org.ossreviewtoolkit.model.utils.FileArchiverFileStorage
-import org.ossreviewtoolkit.model.utils.PostgresFileArchiverStorage
+import org.ossreviewtoolkit.model.utils.FileProvenanceFileStorage
+import org.ossreviewtoolkit.model.utils.PostgresProvenanceFileStorage
 import org.ossreviewtoolkit.utils.ort.storage.FileStorage
-import org.ossreviewtoolkit.utils.ort.storage.LocalFileStorage
+import org.ossreviewtoolkit.utils.ort.storage.XZCompressedLocalFileStorage
 
-/**
- * The configuration model for a [FileArchiver].
- */
+/** The configuration model for a [FileArchiver]. */
+@JsonInclude(JsonInclude.Include.NON_NULL)
 data class FileArchiverConfiguration(
-    /**
-     * Toggle to enable or disable the file archiver functionality altogether.
-     */
+    /** Toggle to enable or disable the file archiver functionality altogether. */
     val enabled: Boolean = true,
 
-    /**
-     * Configuration of the [FileStorage] used for archiving the files.
-     */
+    /** Configuration of the [FileStorage] used for archiving the files. */
     val fileStorage: FileStorageConfiguration? = null,
 
-    /**
-     * Configuration of the [PostgresFileArchiverStorage] used for archiving the files.
-     */
+    /** Configuration of the [PostgresProvenanceFileStorage] used for archiving the files. */
     val postgresStorage: PostgresStorageConfiguration? = null
 ) {
-    companion object : Logging
+    companion object {
+        const val ARCHIVE_FILENAME = "archive.zip"
+        const val TABLE_NAME = "file_archives"
+    }
 
     init {
         if (fileStorage != null && postgresStorage != null) {
             logger.warn {
                 "'fileStorage' and 'postgresStorage' are both configured but only one storage can be used. Using " +
-                        "'fileStorage'."
+                    "'fileStorage'."
             }
         }
     }
 }
 
-/**
- * Create a [FileArchiver] based on this configuration.
- */
+/** Create a [FileArchiver] based on this configuration. */
 fun FileArchiverConfiguration?.createFileArchiver(): FileArchiver? {
     if (this?.enabled == false) return null
 
     val storage = when {
-        this?.fileStorage != null -> FileArchiverFileStorage(fileStorage.createFileStorage())
+        this?.fileStorage != null -> FileProvenanceFileStorage(
+            storage = fileStorage.createFileStorage(),
+            filename = FileArchiverConfiguration.ARCHIVE_FILENAME
+        )
 
         this?.postgresStorage != null -> {
             val dataSource = DatabaseUtils.createHikariDataSource(
@@ -74,13 +73,16 @@ fun FileArchiverConfiguration?.createFileArchiver(): FileArchiver? {
                 applicationNameSuffix = "file-archiver"
             )
 
-            PostgresFileArchiverStorage(dataSource)
+            PostgresProvenanceFileStorage(dataSource, FileArchiverConfiguration.TABLE_NAME)
         }
 
-        else -> FileArchiverFileStorage(LocalFileStorage(FileArchiver.DEFAULT_ARCHIVE_DIR))
+        else -> FileProvenanceFileStorage(
+            storage = XZCompressedLocalFileStorage(FileArchiver.DEFAULT_ARCHIVE_DIR),
+            filename = FileArchiverConfiguration.ARCHIVE_FILENAME
+        )
     }
 
-    val patterns = LicenseFilenamePatterns.getInstance().allLicenseFilenames
+    val patterns = LicenseFilePatterns.getInstance().allLicenseFilenames.map { "**/$it" }
 
     return FileArchiver(patterns, storage)
 }

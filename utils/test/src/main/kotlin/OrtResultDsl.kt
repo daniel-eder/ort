@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2022 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,8 +19,6 @@
 
 package org.ossreviewtoolkit.utils.test
 
-import java.util.SortedSet
-
 import org.ossreviewtoolkit.model.AnalyzerResult
 import org.ossreviewtoolkit.model.AnalyzerRun
 import org.ossreviewtoolkit.model.Identifier
@@ -36,18 +34,16 @@ annotation class OrtResultDsl
 
 @OrtResultDsl
 class OrtResultBuilder {
-    private val projects = mutableListOf<Project>()
-    private val packages = mutableListOf<Package>()
-    private val parentChildIds = mutableMapOf<String, MutableList<String>>()
+    private val projects = mutableSetOf<Project>()
+    private val packages = mutableSetOf<Package>()
+    private val parentChildIds = mutableMapOf<String, MutableSet<String>>()
 
     @OrtResultDsl
     inner class ProjectBuilder(private val id: String) {
-        private val rootIds = mutableListOf<String>()
+        private val rootIds = mutableSetOf<String>()
 
-        @OrtResultDsl
         var license = "Apache-2.0"
 
-        @OrtResultDsl
         fun pkg(id: String, setup: PkgBuilder.() -> Unit): Package {
             rootIds += id
             val pkg = this@OrtResultBuilder.PkgBuilder(id).apply(setup).build()
@@ -55,8 +51,8 @@ class OrtResultBuilder {
             return pkg
         }
 
-        private fun getDependencies(ids: List<String>): SortedSet<PackageReference> =
-            ids.mapTo(sortedSetOf()) {
+        private fun getDependencies(ids: Set<String>): Set<PackageReference> =
+            ids.mapTo(mutableSetOf()) {
                 PackageReference(
                     id = Identifier(it),
                     dependencies = getDependencies(this@OrtResultBuilder.parentChildIds[it].orEmpty())
@@ -69,32 +65,30 @@ class OrtResultBuilder {
                 dependencies = getDependencies(rootIds)
             )
 
-            val declaredLicenses = sortedSetOf(license)
+            val declaredLicenses = setOf(license)
 
             return Project.EMPTY.copy(
                 id = Identifier(id),
                 declaredLicenses = declaredLicenses,
                 declaredLicensesProcessed = DeclaredLicenseProcessor.process(declaredLicenses),
-                scopeDependencies = sortedSetOf(scope)
+                scopeDependencies = setOf(scope)
             )
         }
     }
 
     @OrtResultDsl
     inner class PkgBuilder(private val id: String) {
-        @OrtResultDsl
         var license = "Apache-2.0"
 
-        @OrtResultDsl
         fun pkg(id: String, setup: PkgBuilder.() -> Unit): Package {
-            this@OrtResultBuilder.parentChildIds.getOrPut(this@PkgBuilder.id) { mutableListOf() } += id
+            this@OrtResultBuilder.parentChildIds.getOrPut(this@PkgBuilder.id) { mutableSetOf() } += id
             val pkg = this@OrtResultBuilder.PkgBuilder(id).apply(setup).build()
             this@OrtResultBuilder.packages += pkg
             return pkg
         }
 
         fun build(): Package {
-            val declaredLicenses = sortedSetOf(license)
+            val declaredLicenses = setOf(license)
 
             return Package.EMPTY.copy(
                 id = Identifier(id),
@@ -104,24 +98,21 @@ class OrtResultBuilder {
         }
     }
 
-    @OrtResultDsl
     fun project(id: String, setup: ProjectBuilder.() -> Unit): Project {
         val project = ProjectBuilder(id).apply(setup).build()
         projects += project
         return project
     }
 
-    fun build(): OrtResult {
-        return OrtResult.EMPTY.copy(
+    fun build(): OrtResult =
+        OrtResult.EMPTY.copy(
             analyzer = AnalyzerRun.EMPTY.copy(
                 result = AnalyzerResult(
-                    projects = projects.toSortedSet(),
-                    packages = packages.mapTo(sortedSetOf()) { it.toCuratedPackage() }
+                    projects = projects,
+                    packages = packages
                 )
             )
         )
-    }
 }
 
-@OrtResultDsl
 fun ortResult(setup: OrtResultBuilder.() -> Unit) = OrtResultBuilder().apply(setup).build()

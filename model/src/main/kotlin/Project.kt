@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,13 +22,14 @@ package org.ossreviewtoolkit.model
 import com.fasterxml.jackson.annotation.JsonIgnore
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.fasterxml.jackson.databind.annotation.JsonSerialize
 
-import java.util.SortedSet
-
+import org.ossreviewtoolkit.model.utils.ScopeSortedSetConverter
 import org.ossreviewtoolkit.utils.ort.DeclaredLicenseProcessor
 import org.ossreviewtoolkit.utils.ort.ProcessedDeclaredLicense
-import org.ossreviewtoolkit.utils.spdx.SpdxExpression
-import org.ossreviewtoolkit.utils.spdx.SpdxOperator
+import org.ossreviewtoolkit.utils.ort.StringSortedSetConverter
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxExpression
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxOperator
 
 /**
  * A class describing a software project. A [Project] is very similar to a [Package] but contains some additional
@@ -42,9 +43,7 @@ data class Project(
      */
     val id: Identifier,
 
-    /**
-     * An optional additional identifier in [CPE syntax](https://cpe.mitre.org/specification/).
-     */
+    /** An optional additional identifier in [CPE syntax](https://cpe.mitre.org/specification/). */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     val cpe: String? = null,
 
@@ -54,17 +53,17 @@ data class Project(
      */
     val definitionFilePath: String,
 
-    /**
-     * The set of authors declared for this project.
-     */
-    @JsonInclude(JsonInclude.Include.NON_DEFAULT)
-    val authors: SortedSet<String> = sortedSetOf(),
+    /** The set of authors declared for this project. */
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    @JsonSerialize(converter = StringSortedSetConverter::class)
+    val authors: Set<String> = emptySet(),
 
     /**
      * The set of licenses declared for this project. This does not necessarily correspond to the licenses as detected
      * by a scanner. Both need to be taken into account for any conclusions.
      */
-    val declaredLicenses: SortedSet<String>,
+    @JsonSerialize(converter = StringSortedSetConverter::class)
+    val declaredLicenses: Set<String>,
 
     /**
      * The declared licenses as [SpdxExpression]. If [declaredLicenses] contains multiple licenses they are
@@ -72,19 +71,20 @@ data class Project(
      */
     val declaredLicensesProcessed: ProcessedDeclaredLicense = DeclaredLicenseProcessor.process(declaredLicenses),
 
-    /**
-     * Original VCS-related information as defined in the [Project]'s metadata.
-     */
+    /** Original VCS-related information as defined in the [Project]'s metadata. */
     val vcs: VcsInfo,
 
     /**
      * Processed VCS-related information about the [Project] that has e.g. common mistakes corrected.
+     * The information originates from [vcs], and optionally also from the code repository of the project.
      */
     val vcsProcessed: VcsInfo = vcs.normalize(),
 
-    /**
-     * The URL to the project's homepage.
-     */
+    /** The description of project. */
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    val description: String = "",
+
+    /** The URL to the project's homepage. */
     val homepageUrl: String,
 
     /**
@@ -94,7 +94,8 @@ data class Project(
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty("scopes")
-    val scopeDependencies: SortedSet<Scope>? = null,
+    @JsonSerialize(converter = ScopeSortedSetConverter::class)
+    val scopeDependencies: Set<Scope>? = null,
 
     /**
      * Contains dependency information as a set of scope names in case a shared [DependencyGraph] is used. The scopes
@@ -102,30 +103,29 @@ data class Project(
      * graph.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    val scopeNames: SortedSet<String>? = null
-) : Comparable<Project> {
+    @JsonSerialize(converter = StringSortedSetConverter::class)
+    val scopeNames: Set<String>? = null
+) {
     companion object {
-        /**
-         * A constant for a [Project] where all properties are empty.
-         */
+        /** A constant for a [Project] where all properties are empty. */
         @JvmField
         val EMPTY = Project(
             id = Identifier.EMPTY,
             definitionFilePath = "",
-            authors = sortedSetOf(),
-            declaredLicenses = sortedSetOf(),
+            authors = emptySet(),
+            declaredLicenses = emptySet(),
             declaredLicensesProcessed = ProcessedDeclaredLicense.EMPTY,
             vcs = VcsInfo.EMPTY,
             vcsProcessed = VcsInfo.EMPTY,
             homepageUrl = "",
-            scopeDependencies = sortedSetOf()
+            scopeDependencies = emptySet()
         )
     }
 
     init {
         require(scopeDependencies == null || scopeNames == null) {
             "Not both 'scopeDependencies' and 'scopeNames' may be set, as otherwise it is ambiguous which one " +
-                    "to use."
+                "to use."
         }
     }
 
@@ -134,59 +134,26 @@ data class Project(
      * matter whether this information has been initialized directly or has been encoded in a [DependencyGraph].
      */
     @get:JsonIgnore
-    val scopes by lazy { scopeDependencies ?: sortedSetOf() }
+    val scopes: Set<Scope> by lazy { scopeDependencies.orEmpty() }
 
-    /**
-     * Return a [Project] instance that has its scope information directly available, resolved from the given [graph].
-     * This function can be used to create a fully initialized [Project] if dependency information is available in a
-     * shared [DependencyGraph]. In this case, the set with [Scope]s is constructed as a subset of the provided shared
-     * graph. Otherwise, result is this same object.
-     */
-    fun withResolvedScopes(graph: DependencyGraph?): Project =
-        if (graph != null && scopeNames != null) {
-            copy(
-                scopeDependencies = graph.createScopes(qualifiedScopeNames()),
-                scopeNames = null
-            )
-        } else {
-            this
-        }
-
-    /**
-     * A comparison function to sort projects by their identifier.
-     */
-    override fun compareTo(other: Project) = id.compareTo(other.id)
-
-    /**
-     * Return whether the package identified by [id] is contained as a (transitive) dependency in this project.
-     */
+    /** Return whether the package identified by [id] is contained as a (transitive) dependency in this project. */
     operator fun contains(id: Identifier) = scopes.any { id in it }
 
-    /**
-     * Return all references to [id] as a dependency in this project.
-     */
+    /** Return all references to [id] as a dependency in this project. */
     fun findReferences(id: Identifier) = scopes.flatMap { it.findReferences(id) }
 
-    /**
-     * Return a [Package] representation of this [Project].
-     */
+    /** Return a [Package] representation of this [Project]. */
     fun toPackage() =
         Package(
             id = id,
+            purl = "",
             authors = authors,
             declaredLicenses = declaredLicenses,
-            description = "",
+            description = description,
             homepageUrl = homepageUrl,
             binaryArtifact = RemoteArtifact.EMPTY,
             sourceArtifact = RemoteArtifact.EMPTY,
             vcs = vcs,
             vcsProcessed = vcsProcessed
         )
-
-    /**
-     * Return a set with scope names that are qualified by this project's identifier. This is necessary when
-     * extracting the scopes of this project from a shared dependency graph.
-     */
-    private fun qualifiedScopeNames(): Set<String> =
-        scopeNames.orEmpty().map { DependencyGraph.qualifyScope(this, it) }.toSet()
 }

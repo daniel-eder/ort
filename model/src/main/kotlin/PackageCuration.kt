@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,83 +21,33 @@ package org.ossreviewtoolkit.model
 
 import com.fasterxml.jackson.annotation.JsonProperty
 
-import com.vdurmont.semver4j.Requirement
-import com.vdurmont.semver4j.Semver
+import org.ossreviewtoolkit.model.utils.isMatchedBy
 
-import org.apache.logging.log4j.kotlin.Logging
-
-import org.ossreviewtoolkit.utils.ort.showStackTrace
-
-/**
- * Return true if this string equals the [other] string, or if either string is blank.
- */
-private fun String.equalsOrIsBlank(other: String) = equals(other) || isBlank() || other.isBlank()
-
-/**
- * This class assigns a [PackageCurationData] object to a [Package] identified by the [id].
- */
+/** This class assigns a [PackageCurationData] object to a [Package] identified by the [id]. */
 data class PackageCuration(
-    /**
-     * The identifier of the package.
-     */
+    /** The identifier of the package. */
     val id: Identifier,
 
-    /**
-     * The curation data for the package.
-     */
+    /** The curation data for the package. */
     @JsonProperty("curations")
     val data: PackageCurationData
 ) {
-    companion object : Logging
-
-    /**
-     * Return true if this [PackageCuration] is applicable to the package with the given [identifier][pkgId],
-     * disregarding the version.
-     */
-    private fun isApplicableDisregardingVersion(pkgId: Identifier) =
-        id.type.equals(pkgId.type, ignoreCase = true)
-                && id.namespace == pkgId.namespace
-                && id.name.equalsOrIsBlank(pkgId.name)
-
-    /**
-     * Return true if the version of this [PackageCuration] interpreted as an Ivy version matcher is applicable to the
-     * package with the given [identifier][pkgId].
-     */
-    private fun isApplicableIvyVersion(pkgId: Identifier) =
-        runCatching {
-            // TODO: This check does not completely comply to the Ivy version-matchers specification. E.g. the version
-            //       '1.0' does not satisfy the version range [1.0,2.0], see
-            //       https://github.com/vdurmont/semver4j/issues/67.
-            Requirement.buildIvy(id.version).isSatisfiedBy(Semver(pkgId.version, Semver.SemverType.LOOSE))
-        }.onFailure {
-            logger.warn {
-                "Failed to check if package curation version '${id.version}' is applicable to package version " +
-                        "'${pkgId.version}' of package '${pkgId.toCoordinates()}'."
-            }
-
-            it.showStackTrace()
-        }.getOrDefault(false)
-
     /**
      * Return true if this [PackageCuration] is applicable to the package with the given [identifier][pkgId]. The
      * curation's version may be an
      * [Ivy version matcher](http://ant.apache.org/ivy/history/2.4.0/settings/version-matchers.html).
      */
-    fun isApplicable(pkgId: Identifier): Boolean =
-        isApplicableDisregardingVersion(pkgId)
-                && (id.version.equalsOrIsBlank(pkgId.version) || isApplicableIvyVersion(pkgId))
+    fun isApplicable(pkgId: Identifier): Boolean = pkgId.isMatchedBy(id)
 
     /**
-     * Apply the curation [data] to the provided [targetPackage].
-     *
-     * @see [PackageCurationData.apply]
+     * Apply the curation [data] to the provided [basePackage] by calling [PackageCurationData.apply], if applicable.
      */
-    fun apply(targetPackage: CuratedPackage): CuratedPackage {
-        require(isApplicable(targetPackage.metadata.id)) {
+    fun apply(basePackage: CuratedPackage): CuratedPackage {
+        require(isApplicable(basePackage.metadata.id)) {
             "Package curation identifier '${id.toCoordinates()}' does not match package identifier " +
-                    "'${targetPackage.metadata.id.toCoordinates()}'."
+                "'${basePackage.metadata.id.toCoordinates()}'."
         }
 
-        return data.apply(targetPackage)
+        return data.apply(basePackage)
     }
 }

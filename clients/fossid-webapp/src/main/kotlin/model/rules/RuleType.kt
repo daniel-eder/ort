@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2022 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,9 +19,7 @@
 
 package org.ossreviewtoolkit.clients.fossid.model.rules
 
-/**
- * An enum specifying the type of "ignore rule".
- */
+/** An enum specifying the type of "ignore rule". */
 enum class RuleType {
     /**
      * A rule that allows to ignore all directories with a specific name during scan.
@@ -29,13 +27,9 @@ enum class RuleType {
      */
     DIRECTORY,
 
-    /**
-     * A rule that allows to ignore all files with a given extension during scan.
-     */
+    /** A rule that allows to ignore all files with a given extension during scan. */
     EXTENSION,
 
-    /**
-     * A rule that allows to ignore all files with a specific name during scan.
-     */
+    /** A rule that allows to ignore all files with a specific name during scan. */
     FILE
 }

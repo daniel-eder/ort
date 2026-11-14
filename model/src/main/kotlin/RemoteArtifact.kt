@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,24 +19,16 @@
 
 package org.ossreviewtoolkit.model
 
-/**
- * Bundles information about a remote artifact.
- */
+/** Bundles information about a remote artifact. */
 data class RemoteArtifact(
-    /**
-     * The URL of the remote artifact.
-     */
+    /** The URL of the remote artifact. */
     val url: String,
 
-    /**
-     * The hash of the remote artifact.
-     */
+    /** The hash of the remote artifact. */
     val hash: Hash
 ) {
     companion object {
-        /**
-         * A constant for a [RemoteArtifact] where all properties are empty strings.
-         */
+        /** A constant for a [RemoteArtifact] where all properties are empty strings. */
         @JvmField
         val EMPTY = RemoteArtifact(
             url = "",
@@ -45,7 +37,5 @@ data class RemoteArtifact(
     }
 }
 
-/**
- * Return this [RemoteArtifact] if not null or else [RemoteArtifact.EMPTY].
- */
+/** Return this [RemoteArtifact] if not null or else [RemoteArtifact.EMPTY]. */
 fun RemoteArtifact?.orEmpty(): RemoteArtifact = this ?: RemoteArtifact.EMPTY

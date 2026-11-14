@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2020 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,10 +19,8 @@
 
 package org.ossreviewtoolkit.clients.fossid.model
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize
 
-@JsonIgnoreProperties(ignoreUnknown = true)
 data class Scan(
     val id: Int,
     val created: String?,
@@ -61,7 +59,8 @@ data class Scan(
 
     val importedMetadata: String?,
 
-    val hasFileExtension: Int?,
+    @JsonDeserialize(using = IntBooleanDeserializer::class)
+    val hasFileExtension: Boolean?,
 
     val jarExtraction: String?,
 

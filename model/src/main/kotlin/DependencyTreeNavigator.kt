@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,23 +29,16 @@ object DependencyTreeNavigator : DependencyNavigator {
     override fun directDependencies(project: Project, scopeName: String): Sequence<DependencyNode> =
         project.findScope(scopeName)?.dependencies?.asSequence().orEmpty()
 
-    override fun dependenciesForScope(
+    override fun scopeDependencies(
         project: Project,
         scopeName: String,
         maxDepth: Int,
         matcher: DependencyMatcher
-    ): Set<Identifier> =
-        project.findScope(scopeName)?.collectDependencies(maxDepth) { matcher(it) }.orEmpty()
+    ): Set<Identifier> = project.findScope(scopeName)?.collectDependencies(maxDepth) { matcher(it) }.orEmpty()
 
-    override fun scopeDependencies(
-        project: Project,
-        maxDepth: Int,
-        matcher: DependencyMatcher
-    ): Map<String, Set<Identifier>> =
+    override fun projectDependencies(project: Project, maxDepth: Int, matcher: DependencyMatcher): Set<Identifier> =
         // Override the base implementation because a more efficient access to single scopes is possible.
-        project.scopes.associate { scope ->
-            scope.name to scope.collectDependencies(maxDepth, matcher.forReference())
-        }
+        project.scopes.flatMapTo(mutableSetOf()) { it.collectDependencies(maxDepth, matcher.forReference()) }
 
     override fun packageDependencies(
         project: Project,
@@ -64,7 +57,5 @@ object DependencyTreeNavigator : DependencyNavigator {
  */
 private fun DependencyMatcher.forReference(): (PackageReference) -> Boolean = { invoke(it) }
 
-/**
- * Return the scope of this [Project] with the given [name] or *null* if it does not exist.
- */
+/** Return the scope of this [Project] with the given [name] or *null* if it does not exist. */
 private fun Project.findScope(name: String): Scope? = scopes.find { it.name == name }

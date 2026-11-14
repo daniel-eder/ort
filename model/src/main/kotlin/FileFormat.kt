@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,10 +21,10 @@ package org.ossreviewtoolkit.model
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.module.kotlin.convertValue
-import com.fasterxml.jackson.module.kotlin.readValue
+import com.fasterxml.jackson.module.kotlin.readValues
 
 import java.io.File
+import java.io.IOException
 
 import org.ossreviewtoolkit.utils.common.safeMkdirs
 
@@ -33,51 +33,34 @@ import org.ossreviewtoolkit.utils.common.safeMkdirs
  * (not including the dot).
  */
 enum class FileFormat(val mapper: ObjectMapper, val fileExtension: String, vararg aliases: String) {
-    /**
-     * Specifies the [JSON](http://www.json.org/) format.
-     */
+    /** Specifies the [JSON](http://www.json.org/) format. */
     JSON(jsonMapper, "json"),
 
-    /**
-     * Specifies the [XML](http://www.xml.org/) format.
-     */
-    XML(xmlMapper, "xml"),
-
-    /**
-     * Specifies the [YAML](http://yaml.org/) format.
-     */
+    /** Specifies the [YAML](http://yaml.org/) format. */
     YAML(yamlMapper, "yml", "yaml");
 
     companion object {
-        /**
-         * Return the [FileFormat] for the given [extension], or `null` if there is none.
-         */
+        /** Return the [FileFormat] for the given [extension], or `null` if there is none. */
         fun forExtension(extension: String): FileFormat =
             extension.lowercase().let { lowerCaseExtension ->
-                enumValues<FileFormat>().find {
+                FileFormat.entries.find {
                     lowerCaseExtension in it.fileExtensions
                 } ?: throw IllegalArgumentException(
                     "Unknown file format for file extension '$extension'."
                 )
             }
 
-        /**
-         * Return the [FileFormat] for the given [file], or `null` if there is none.
-         */
+        /** Return the [FileFormat] for the given [file], or `null` if there is none. */
         fun forFile(file: File): FileFormat = forExtension(file.extension)
 
-        /**
-         * Return a list of all files inside [directory] with known extensions that can be deserialized.
-         */
+        /** Return a list of all files inside [directory] with known extensions that can be deserialized. */
         fun findFilesWithKnownExtensions(directory: File): List<File> {
-            val allFileExtensions = enumValues<FileFormat>().flatMap { it.fileExtensions }
+            val allFileExtensions = FileFormat.entries.flatMap { it.fileExtensions }
             return directory.walkBottomUp().filter { it.isFile && it.extension in allFileExtensions }.toList()
         }
     }
 
-    /**
-     * The list of file extensions used by this file format.
-     */
+    /** The list of file extensions used by this file format. */
     val fileExtensions = listOf(fileExtension, *aliases)
 }
 
@@ -88,24 +71,33 @@ enum class FileFormat(val mapper: ObjectMapper, val fileExtension: String, varar
  */
 fun File.mapper() = FileFormat.forFile(this).mapper
 
-/**
- * Use the Jackson mapper returned from [File.mapper] to read a tree of [(JSON) nodes][JsonNode] from this file.
- */
+/** Use the Jackson mapper returned from [File.mapper] to read a tree of [(JSON) nodes][JsonNode] from this file. */
 fun File.readTree(): JsonNode = mapper().readTree(this)
 
 /**
- * Use the Jackson mapper returned from [File.mapper] to read an object of type [T] from this file.
+ * Use the Jackson mapper returned from [File.mapper] to read a single object of type [T] from this file. Throw an
+ * [IOException] if not exactly one value is contained in the file, e.g. in case of multiple YAML documents per file.
  */
-inline fun <reified T : Any> File.readValue(): T = mapper().readValue(this)
+inline fun <reified T : Any> File.readValue(): T =
+    readValueOrNull() ?: throw IOException("No object found in file '$this'.")
 
 /**
  * Use the Jackson mapper returned from [File.mapper] to read an object of type [T] from this file, or return null if
- * the file has no content.
+ * the file has no content. Throw an [IOException] if not exactly one value is contained in the file, e.g. in case of
+ * multiple YAML documents per file.
  */
-inline fun <reified T : Any> File.readValueOrNull(): T? =
-    // Parse the file in a two-step process to avoid readValue() throwing an exception on empty files. Also see
-    // https://github.com/FasterXML/jackson-databind/issues/1406#issuecomment-252676674.
-    mapper().let { it.convertValue(it.readTree(this)) }
+inline fun <reified T : Any> File.readValueOrNull(): T? {
+    val mapper = mapper()
+
+    val values = mapper.factory.createParser(this).use { parser ->
+        mapper.readValues<T>(parser).readAll().also {
+            if (it.isEmpty()) return null
+            if (it.size > 1) throw IOException("Multiple top-level objects found in file '$this'.")
+        }
+    }
+
+    return values.first()
+}
 
 /**
  * Use the Jackson mapper returned from [File.mapper] to read an object of type [T] from this file, or return the

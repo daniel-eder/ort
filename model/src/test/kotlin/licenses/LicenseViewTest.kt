@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,18 +28,24 @@ import io.kotest.matchers.should
 import org.ossreviewtoolkit.model.LicenseSource
 import org.ossreviewtoolkit.model.Package
 import org.ossreviewtoolkit.model.config.CopyrightGarbage
-import org.ossreviewtoolkit.model.utils.FileArchiver
-import org.ossreviewtoolkit.model.utils.PackageConfigurationProvider
-import org.ossreviewtoolkit.utils.spdx.SpdxSingleLicenseExpression
-import org.ossreviewtoolkit.utils.test.createDefault
+import org.ossreviewtoolkit.model.ortResult
+import org.ossreviewtoolkit.model.packageWithConcludedAndDeclaredAndDetectedLicense
+import org.ossreviewtoolkit.model.packageWithConcludedAndDeclaredLicense
+import org.ossreviewtoolkit.model.packageWithConcludedAndDetectedLicense
+import org.ossreviewtoolkit.model.packageWithConcludedLicense
+import org.ossreviewtoolkit.model.packageWithDeclaredAndDetectedLicense
+import org.ossreviewtoolkit.model.packageWithDeclaredLicense
+import org.ossreviewtoolkit.model.packageWithDetectedLicense
+import org.ossreviewtoolkit.model.packageWithoutLicense
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxSingleLicenseExpression
 import org.ossreviewtoolkit.utils.test.transformingCollectionMatcher
 
 class LicenseViewTest : WordSpec() {
     private val licenseInfoResolver = LicenseInfoResolver(
-        provider = DefaultLicenseInfoProvider(ortResult, PackageConfigurationProvider.EMPTY),
+        provider = DefaultLicenseInfoProvider(ortResult),
         copyrightGarbage = CopyrightGarbage(),
         addAuthorsToCopyrights = false,
-        archiver = FileArchiver.createDefault()
+        archiver = null
     )
 
     private fun LicenseView.getLicensesWithSources(
@@ -53,7 +59,7 @@ class LicenseViewTest : WordSpec() {
         vararg licenses: Pair<String, LicenseSource>
     ): Matcher<List<Pair<SpdxSingleLicenseExpression, LicenseSource>>?> =
         transformingCollectionMatcher(
-            expected = licenses.toList(),
+            expected = licenses.asList(),
             matcher = ::containAll
         ) { list ->
             list.map { (expression, source) -> expression.toString() to source }
@@ -67,56 +73,56 @@ class LicenseViewTest : WordSpec() {
                 view.getLicensesWithSources(packageWithoutLicense) should beEmpty()
 
                 view.getLicensesWithSources(packageWithConcludedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.CONCLUDED,
-                            "LicenseRef-b" to LicenseSource.CONCLUDED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.CONCLUDED,
+                        "LicenseRef-b" to LicenseSource.CONCLUDED
+                    )
 
                 view.getLicensesWithSources(packageWithDeclaredLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.DECLARED,
-                            "LicenseRef-b" to LicenseSource.DECLARED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.DECLARED,
+                        "LicenseRef-b" to LicenseSource.DECLARED
+                    )
 
                 view.getLicensesWithSources(packageWithDetectedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.DETECTED,
-                            "LicenseRef-b" to LicenseSource.DETECTED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.DETECTED,
+                        "LicenseRef-b" to LicenseSource.DETECTED
+                    )
 
                 view.getLicensesWithSources(packageWithConcludedAndDeclaredLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.CONCLUDED,
-                            "LicenseRef-b" to LicenseSource.CONCLUDED,
-                            "LicenseRef-a" to LicenseSource.DECLARED,
-                            "LicenseRef-b" to LicenseSource.DECLARED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.CONCLUDED,
+                        "LicenseRef-b" to LicenseSource.CONCLUDED,
+                        "LicenseRef-a" to LicenseSource.DECLARED,
+                        "LicenseRef-b" to LicenseSource.DECLARED
+                    )
 
                 view.getLicensesWithSources(packageWithConcludedAndDetectedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.CONCLUDED,
-                            "LicenseRef-b" to LicenseSource.CONCLUDED,
-                            "LicenseRef-a" to LicenseSource.DETECTED,
-                            "LicenseRef-b" to LicenseSource.DETECTED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.CONCLUDED,
+                        "LicenseRef-b" to LicenseSource.CONCLUDED,
+                        "LicenseRef-a" to LicenseSource.DETECTED,
+                        "LicenseRef-b" to LicenseSource.DETECTED
+                    )
 
                 view.getLicensesWithSources(packageWithDeclaredAndDetectedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.DECLARED,
-                            "LicenseRef-b" to LicenseSource.DECLARED,
-                            "LicenseRef-a" to LicenseSource.DETECTED,
-                            "LicenseRef-b" to LicenseSource.DETECTED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.DECLARED,
+                        "LicenseRef-b" to LicenseSource.DECLARED,
+                        "LicenseRef-a" to LicenseSource.DETECTED,
+                        "LicenseRef-b" to LicenseSource.DETECTED
+                    )
 
                 view.getLicensesWithSources(packageWithConcludedAndDeclaredAndDetectedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.CONCLUDED,
-                            "LicenseRef-b" to LicenseSource.CONCLUDED,
-                            "LicenseRef-a" to LicenseSource.DECLARED,
-                            "LicenseRef-b" to LicenseSource.DECLARED,
-                            "LicenseRef-a" to LicenseSource.DETECTED,
-                            "LicenseRef-b" to LicenseSource.DETECTED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.CONCLUDED,
+                        "LicenseRef-b" to LicenseSource.CONCLUDED,
+                        "LicenseRef-a" to LicenseSource.DECLARED,
+                        "LicenseRef-b" to LicenseSource.DECLARED,
+                        "LicenseRef-a" to LicenseSource.DETECTED,
+                        "LicenseRef-b" to LicenseSource.DETECTED
+                    )
             }
         }
 
@@ -127,48 +133,48 @@ class LicenseViewTest : WordSpec() {
                 view.getLicensesWithSources(packageWithoutLicense) should beEmpty()
 
                 view.getLicensesWithSources(packageWithConcludedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.CONCLUDED,
-                            "LicenseRef-b" to LicenseSource.CONCLUDED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.CONCLUDED,
+                        "LicenseRef-b" to LicenseSource.CONCLUDED
+                    )
 
                 view.getLicensesWithSources(packageWithDeclaredLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.DECLARED,
-                            "LicenseRef-b" to LicenseSource.DECLARED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.DECLARED,
+                        "LicenseRef-b" to LicenseSource.DECLARED
+                    )
 
                 view.getLicensesWithSources(packageWithDetectedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.DETECTED,
-                            "LicenseRef-b" to LicenseSource.DETECTED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.DETECTED,
+                        "LicenseRef-b" to LicenseSource.DETECTED
+                    )
 
                 view.getLicensesWithSources(packageWithConcludedAndDeclaredLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.CONCLUDED,
-                            "LicenseRef-b" to LicenseSource.CONCLUDED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.CONCLUDED,
+                        "LicenseRef-b" to LicenseSource.CONCLUDED
+                    )
 
                 view.getLicensesWithSources(packageWithConcludedAndDetectedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.CONCLUDED,
-                            "LicenseRef-b" to LicenseSource.CONCLUDED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.CONCLUDED,
+                        "LicenseRef-b" to LicenseSource.CONCLUDED
+                    )
 
                 view.getLicensesWithSources(packageWithDeclaredAndDetectedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.DECLARED,
-                            "LicenseRef-b" to LicenseSource.DECLARED,
-                            "LicenseRef-a" to LicenseSource.DETECTED,
-                            "LicenseRef-b" to LicenseSource.DETECTED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.DECLARED,
+                        "LicenseRef-b" to LicenseSource.DECLARED,
+                        "LicenseRef-a" to LicenseSource.DETECTED,
+                        "LicenseRef-b" to LicenseSource.DETECTED
+                    )
 
                 view.getLicensesWithSources(packageWithConcludedAndDeclaredAndDetectedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.CONCLUDED,
-                            "LicenseRef-b" to LicenseSource.CONCLUDED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.CONCLUDED,
+                        "LicenseRef-b" to LicenseSource.CONCLUDED
+                    )
             }
         }
 
@@ -179,46 +185,46 @@ class LicenseViewTest : WordSpec() {
                 view.getLicensesWithSources(packageWithoutLicense) should beEmpty()
 
                 view.getLicensesWithSources(packageWithConcludedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.CONCLUDED,
-                            "LicenseRef-b" to LicenseSource.CONCLUDED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.CONCLUDED,
+                        "LicenseRef-b" to LicenseSource.CONCLUDED
+                    )
 
                 view.getLicensesWithSources(packageWithDeclaredLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.DECLARED,
-                            "LicenseRef-b" to LicenseSource.DECLARED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.DECLARED,
+                        "LicenseRef-b" to LicenseSource.DECLARED
+                    )
 
                 view.getLicensesWithSources(packageWithDetectedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.DETECTED,
-                            "LicenseRef-b" to LicenseSource.DETECTED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.DETECTED,
+                        "LicenseRef-b" to LicenseSource.DETECTED
+                    )
 
                 view.getLicensesWithSources(packageWithConcludedAndDeclaredLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.CONCLUDED,
-                            "LicenseRef-b" to LicenseSource.CONCLUDED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.CONCLUDED,
+                        "LicenseRef-b" to LicenseSource.CONCLUDED
+                    )
 
                 view.getLicensesWithSources(packageWithConcludedAndDetectedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.CONCLUDED,
-                            "LicenseRef-b" to LicenseSource.CONCLUDED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.CONCLUDED,
+                        "LicenseRef-b" to LicenseSource.CONCLUDED
+                    )
 
                 view.getLicensesWithSources(packageWithDeclaredAndDetectedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.DECLARED,
-                            "LicenseRef-b" to LicenseSource.DECLARED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.DECLARED,
+                        "LicenseRef-b" to LicenseSource.DECLARED
+                    )
 
                 view.getLicensesWithSources(packageWithConcludedAndDeclaredAndDetectedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.CONCLUDED,
-                            "LicenseRef-b" to LicenseSource.CONCLUDED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.CONCLUDED,
+                        "LicenseRef-b" to LicenseSource.CONCLUDED
+                    )
             }
         }
 
@@ -229,42 +235,42 @@ class LicenseViewTest : WordSpec() {
                 view.getLicensesWithSources(packageWithoutLicense) should beEmpty()
 
                 view.getLicensesWithSources(packageWithConcludedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.CONCLUDED,
-                            "LicenseRef-b" to LicenseSource.CONCLUDED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.CONCLUDED,
+                        "LicenseRef-b" to LicenseSource.CONCLUDED
+                    )
 
                 view.getLicensesWithSources(packageWithDeclaredLicense) should beEmpty()
 
                 view.getLicensesWithSources(packageWithDetectedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.DETECTED,
-                            "LicenseRef-b" to LicenseSource.DETECTED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.DETECTED,
+                        "LicenseRef-b" to LicenseSource.DETECTED
+                    )
 
                 view.getLicensesWithSources(packageWithConcludedAndDeclaredLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.CONCLUDED,
-                            "LicenseRef-b" to LicenseSource.CONCLUDED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.CONCLUDED,
+                        "LicenseRef-b" to LicenseSource.CONCLUDED
+                    )
 
                 view.getLicensesWithSources(packageWithConcludedAndDetectedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.CONCLUDED,
-                            "LicenseRef-b" to LicenseSource.CONCLUDED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.CONCLUDED,
+                        "LicenseRef-b" to LicenseSource.CONCLUDED
+                    )
 
                 view.getLicensesWithSources(packageWithDeclaredAndDetectedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.DETECTED,
-                            "LicenseRef-b" to LicenseSource.DETECTED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.DETECTED,
+                        "LicenseRef-b" to LicenseSource.DETECTED
+                    )
 
                 view.getLicensesWithSources(packageWithConcludedAndDeclaredAndDetectedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.CONCLUDED,
-                            "LicenseRef-b" to LicenseSource.CONCLUDED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.CONCLUDED,
+                        "LicenseRef-b" to LicenseSource.CONCLUDED
+                    )
             }
         }
 
@@ -275,34 +281,34 @@ class LicenseViewTest : WordSpec() {
                 view.getLicensesWithSources(packageWithoutLicense) should beEmpty()
 
                 view.getLicensesWithSources(packageWithConcludedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.CONCLUDED,
-                            "LicenseRef-b" to LicenseSource.CONCLUDED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.CONCLUDED,
+                        "LicenseRef-b" to LicenseSource.CONCLUDED
+                    )
 
                 view.getLicensesWithSources(packageWithDeclaredLicense) should beEmpty()
 
                 view.getLicensesWithSources(packageWithDetectedLicense) should beEmpty()
 
                 view.getLicensesWithSources(packageWithConcludedAndDeclaredLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.CONCLUDED,
-                            "LicenseRef-b" to LicenseSource.CONCLUDED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.CONCLUDED,
+                        "LicenseRef-b" to LicenseSource.CONCLUDED
+                    )
 
                 view.getLicensesWithSources(packageWithConcludedAndDetectedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.CONCLUDED,
-                            "LicenseRef-b" to LicenseSource.CONCLUDED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.CONCLUDED,
+                        "LicenseRef-b" to LicenseSource.CONCLUDED
+                    )
 
                 view.getLicensesWithSources(packageWithDeclaredAndDetectedLicense) should beEmpty()
 
                 view.getLicensesWithSources(packageWithConcludedAndDeclaredAndDetectedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.CONCLUDED,
-                            "LicenseRef-b" to LicenseSource.CONCLUDED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.CONCLUDED,
+                        "LicenseRef-b" to LicenseSource.CONCLUDED
+                    )
             }
         }
 
@@ -315,32 +321,32 @@ class LicenseViewTest : WordSpec() {
                 view.getLicensesWithSources(packageWithConcludedLicense) should beEmpty()
 
                 view.getLicensesWithSources(packageWithDeclaredLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.DECLARED,
-                            "LicenseRef-b" to LicenseSource.DECLARED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.DECLARED,
+                        "LicenseRef-b" to LicenseSource.DECLARED
+                    )
 
                 view.getLicensesWithSources(packageWithDetectedLicense) should beEmpty()
 
                 view.getLicensesWithSources(packageWithConcludedAndDeclaredLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.DECLARED,
-                            "LicenseRef-b" to LicenseSource.DECLARED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.DECLARED,
+                        "LicenseRef-b" to LicenseSource.DECLARED
+                    )
 
                 view.getLicensesWithSources(packageWithConcludedAndDetectedLicense) should beEmpty()
 
                 view.getLicensesWithSources(packageWithDeclaredAndDetectedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.DECLARED,
-                            "LicenseRef-b" to LicenseSource.DECLARED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.DECLARED,
+                        "LicenseRef-b" to LicenseSource.DECLARED
+                    )
 
                 view.getLicensesWithSources(packageWithConcludedAndDeclaredAndDetectedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.DECLARED,
-                            "LicenseRef-b" to LicenseSource.DECLARED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.DECLARED,
+                        "LicenseRef-b" to LicenseSource.DECLARED
+                    )
             }
         }
 
@@ -355,30 +361,30 @@ class LicenseViewTest : WordSpec() {
                 view.getLicensesWithSources(packageWithDeclaredLicense) should beEmpty()
 
                 view.getLicensesWithSources(packageWithDetectedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.DETECTED,
-                            "LicenseRef-b" to LicenseSource.DETECTED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.DETECTED,
+                        "LicenseRef-b" to LicenseSource.DETECTED
+                    )
 
                 view.getLicensesWithSources(packageWithConcludedAndDeclaredLicense) should beEmpty()
 
                 view.getLicensesWithSources(packageWithConcludedAndDetectedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.DETECTED,
-                            "LicenseRef-b" to LicenseSource.DETECTED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.DETECTED,
+                        "LicenseRef-b" to LicenseSource.DETECTED
+                    )
 
                 view.getLicensesWithSources(packageWithDeclaredAndDetectedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.DETECTED,
-                            "LicenseRef-b" to LicenseSource.DETECTED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.DETECTED,
+                        "LicenseRef-b" to LicenseSource.DETECTED
+                    )
 
                 view.getLicensesWithSources(packageWithConcludedAndDeclaredAndDetectedLicense) should
-                        containLicensesWithSources(
-                            "LicenseRef-a" to LicenseSource.DETECTED,
-                            "LicenseRef-b" to LicenseSource.DETECTED
-                        )
+                    containLicensesWithSources(
+                        "LicenseRef-a" to LicenseSource.DETECTED,
+                        "LicenseRef-b" to LicenseSource.DETECTED
+                    )
             }
         }
     }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,36 +19,30 @@
 
 package org.ossreviewtoolkit.evaluator
 
-import org.apache.logging.log4j.kotlin.Logging
+import org.apache.logging.log4j.kotlin.logger
 
 import org.ossreviewtoolkit.model.DependencyNode
 import org.ossreviewtoolkit.model.OrtResult
 import org.ossreviewtoolkit.model.Package
 import org.ossreviewtoolkit.model.Project
 import org.ossreviewtoolkit.model.RuleViolation
+import org.ossreviewtoolkit.model.SnippetFinding
 import org.ossreviewtoolkit.model.licenses.LicenseInfoResolver
 import org.ossreviewtoolkit.model.utils.DefaultResolutionProvider
 import org.ossreviewtoolkit.model.utils.ResolutionProvider
 import org.ossreviewtoolkit.model.utils.createLicenseInfoResolver
 
-/**
- * A set of evaluator [Rule]s, using an [ortResult] as input.
- */
+/** A set of evaluator [Rule]s, using an [ortResult] as input. */
 class RuleSet(
     val ortResult: OrtResult,
     val licenseInfoResolver: LicenseInfoResolver,
-    val resolutionProvider: ResolutionProvider
+    val resolutionProvider: ResolutionProvider,
+    val projectSourceResolver: SourceTreeResolver
 ) {
-    companion object : Logging
-
-    /**
-     * The set of all issues created by the rules of this [RuleSet].
-     */
+    /** The set of all issues created by the rules of this [RuleSet]. */
     val violations = mutableSetOf<RuleViolation>()
 
-    /**
-     * A DSL function to configure an [OrtResultRule]. The rule is applied once to [ortResult].
-     */
+    /** A DSL function to configure an [OrtResultRule]. The rule is applied once to [ortResult]. */
     fun ortResultRule(name: String, configure: OrtResultRule.() -> Unit) {
         OrtResultRule(this, name).apply {
             configure()
@@ -56,9 +50,7 @@ class RuleSet(
         }
     }
 
-    /**
-     * A DSL function to configure an [ProjectSourceRule]. The rule is applied once to [ortResult].
-     */
+    /** A DSL function to configure an [ProjectSourceRule]. The rule is applied once to [ortResult]. */
     fun projectSourceRule(name: String, configure: ProjectSourceRule.() -> Unit) {
         ProjectSourceRule(this, name).apply {
             configure()
@@ -71,9 +63,7 @@ class RuleSet(
      * [ortResult].
      */
     fun packageRule(name: String, configure: PackageRule.() -> Unit) {
-        val packages = ortResult.analyzer?.result?.let { analyzerResult ->
-            analyzerResult.projects.map { it.toPackage().toCuratedPackage() } + analyzerResult.packages
-        }.orEmpty()
+        val packages = ortResult.getProjects().map { it.toPackage().toCuratedPackage() } + ortResult.getPackages()
 
         packages.forEach { curatedPackage ->
             val resolvedLicenseInfo = licenseInfoResolver.resolveLicenseInfo(curatedPackage.metadata.id)
@@ -98,12 +88,13 @@ class RuleSet(
             project: Project,
             visitedPackages: MutableSet<DependencyNode>
         ) {
-            if (node in visitedPackages) {
+            val stableNode = node.getStableReference()
+            if (stableNode in visitedPackages) {
                 logger.debug { "Skipping rule $name for already visited dependency ${node.id.toCoordinates()}." }
                 return
             }
 
-            visitedPackages += node
+            visitedPackages += stableNode
 
             val curatedPackage = ortResult.getPackage(node.id)
                 ?: ortResult.getProject(node.id)?.toPackage()?.toCuratedPackage()
@@ -143,7 +134,7 @@ class RuleSet(
             }
         }
 
-        ortResult.analyzer?.result?.projects?.forEach { project ->
+        ortResult.getProjects().forEach { project ->
             ortResult.dependencyNavigator.scopeNames(project).forEach { scopeName ->
                 val visitedPackages = mutableSetOf<DependencyNode>()
                 ortResult.dependencyNavigator.directDependencies(project, scopeName).forEach { dependency ->
@@ -152,14 +143,50 @@ class RuleSet(
             }
         }
     }
+
+    /**
+     * A DSL function to configure a [SnippetRule]. The rule is applied to each [SnippetFinding] in the scan results for
+     * every [Project] in [ortResult].
+     */
+    fun snippetRule(name: String, configure: SnippetRule.() -> Unit) {
+        ortResult.getSnippetFindingsByScannerName().forEach { (scannerName, snippetFindings) ->
+            snippetFindings.forEach { snippetFinding ->
+                SnippetRule(
+                    this,
+                    name,
+                    scannerName,
+                    snippetFinding
+                ).apply {
+                    configure()
+                    evaluate()
+                }
+            }
+        }
+    }
 }
 
-/**
- * A DSL function to configure a [RuleSet].
- */
+/** A DSL function to configure a [RuleSet]. */
 fun ruleSet(
     ortResult: OrtResult,
     licenseInfoResolver: LicenseInfoResolver = ortResult.createLicenseInfoResolver(),
     resolutionProvider: ResolutionProvider = DefaultResolutionProvider.create(),
-    configure: RuleSet.() -> Unit = { }
-) = RuleSet(ortResult, licenseInfoResolver, resolutionProvider).apply(configure)
+    projectSourceResolver: SourceTreeResolver = SourceTreeResolver.forRemoteRepository(
+        ortResult.repository.vcsProcessed
+    ),
+    configure: RuleSet.() -> Unit = {}
+) = RuleSet(ortResult, licenseInfoResolver, resolutionProvider, projectSourceResolver).apply(configure)
+
+private fun OrtResult.getSnippetFindingsByScannerName(): Map<String, Set<SnippetFinding>> {
+    val projectIds = getProjects(
+        omitExcluded = false,
+        includeSubProjects = true
+    ).mapTo(mutableSetOf()) { it.id }
+
+    val scanResults = projectIds.flatMap { getScanResultsForId(it) }
+
+    return buildMap<String, MutableSet<SnippetFinding>> {
+        scanResults.forEach { scanResult ->
+            getOrPut(scanResult.scanner.name) { mutableSetOf() } += scanResult.summary.snippetFindings
+        }
+    }
+}

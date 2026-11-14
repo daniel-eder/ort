@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2020 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,29 +19,11 @@
 
 package org.ossreviewtoolkit.model
 
-import java.util.EnumSet
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 
-import org.ossreviewtoolkit.utils.common.enumSetOf
-
-/**
- * Details about the used provider of vulnerability information.
- */
+/** Details about the used provider of vulnerability information. */
+@JsonIgnoreProperties("capabilities")
 data class AdvisorDetails(
-    /**
-     * The name of the used advisor.
-     */
-    val name: String,
-
-    /**
-     * The capabilities of the used advisor. This property indicates, which kind of findings are retrieved by the
-     * advisor.
-     */
-    val capabilities: EnumSet<AdvisorCapability> = enumSetOf()
-) {
-    companion object {
-        @JvmField
-        val EMPTY = AdvisorDetails(
-            name = ""
-        )
-    }
-}
+    /** The name of the used advisor. */
+    val name: String
+)

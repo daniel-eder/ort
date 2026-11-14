@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,25 +19,24 @@
 
 package org.ossreviewtoolkit.model
 
-import io.kotest.assertions.fail
+import io.kotest.assertions.AssertionErrorBuilder
 import io.kotest.core.spec.style.WordSpec
+import io.kotest.matchers.sequences.shouldContainExactly
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.types.instanceOf
 
 import io.mockk.every
 import io.mockk.mockk
 
-import java.util.SortedSet
-
 class CompatibilityDependencyNavigatorTest : WordSpec() {
-    private val treeProject = createProject("tree", scopes = sortedSetOf(createScope("scope")))
-    private val graphProject = createProject("graph", scopeNames = sortedSetOf("scope"))
+    private val treeProject = createProject("tree", scopes = setOf(createScope("scope")))
+    private val graphProject = createProject("graph", scopeNames = setOf("scope"))
 
     init {
         "create" should {
             "return a DependencyTreeNavigator if all projects use the tree format" {
-                val project1 = createProject("test1", scopes = sortedSetOf(createScope("scope1")))
-                val project2 = createProject("test2", scopes = sortedSetOf(createScope("scope2")))
+                val project1 = createProject("test1", scopes = setOf(createScope("scope1")))
+                val project2 = createProject("test2", scopes = setOf(createScope("scope2")))
                 val result = createOrtResult(project1, project2)
 
                 val navigator = CompatibilityDependencyNavigator.create(result)
@@ -46,8 +45,8 @@ class CompatibilityDependencyNavigatorTest : WordSpec() {
             }
 
             "return a DependencyGraphNavigator if all projects use the graph format" {
-                val project1 = createProject("test1", scopeNames = sortedSetOf("scope1"))
-                val project2 = createProject("test2", scopeNames = sortedSetOf("scope2", "scope3"))
+                val project1 = createProject("test1", scopeNames = setOf("scope1"))
+                val project2 = createProject("test2", scopeNames = setOf("scope2", "scope3"))
                 val result = createOrtResult(project1, project2)
 
                 val navigator = CompatibilityDependencyNavigator.create(result)
@@ -56,8 +55,8 @@ class CompatibilityDependencyNavigatorTest : WordSpec() {
             }
 
             "return a CompatibilityGraphNavigator if mixed representations are used" {
-                val project1 = createProject("test1", scopes = sortedSetOf(createScope("scope1")))
-                val project2 = createProject("test2", scopeNames = sortedSetOf("scope2", "scope3"))
+                val project1 = createProject("test1", scopes = setOf(createScope("scope1")))
+                val project2 = createProject("test2", scopeNames = setOf("scope2", "scope3"))
                 val result = createOrtResult(project1, project2)
 
                 when (val navigator = CompatibilityDependencyNavigator.create(result)) {
@@ -66,7 +65,7 @@ class CompatibilityDependencyNavigatorTest : WordSpec() {
                         navigator.graphNavigator shouldBe instanceOf<DependencyGraphNavigator>()
                     }
 
-                    else -> fail("Unexpected dependency navigator: $navigator.")
+                    else -> AssertionErrorBuilder.fail("Unexpected dependency navigator: $navigator.")
                 }
             }
 
@@ -77,11 +76,11 @@ class CompatibilityDependencyNavigatorTest : WordSpec() {
             }
 
             "return a DependencyTreeNavigator for a result that does not contain any dependency graphs" {
-                val project = createProject("dummy", scopeNames = sortedSetOf())
+                val project = createProject("dummy", scopeNames = setOf())
 
                 val analyzerResult = AnalyzerResult(
-                    projects = sortedSetOf(project),
-                    packages = sortedSetOf(),
+                    projects = setOf(project),
+                    packages = emptySet(),
                     dependencyGraphs = mapOf()
                 )
                 val analyzerRun = AnalyzerRun.EMPTY.copy(result = analyzerResult)
@@ -127,7 +126,7 @@ class CompatibilityDependencyNavigatorTest : WordSpec() {
 
                 val navigator = CompatibilityDependencyNavigator(graphNavigator, treeNavigator)
 
-                navigator.directDependencies(treeProject, scopeName) shouldBe dependencies
+                navigator.directDependencies(treeProject, scopeName) shouldContainExactly dependencies
             }
 
             "return the dependencies of a dependency graph project" {
@@ -139,7 +138,7 @@ class CompatibilityDependencyNavigatorTest : WordSpec() {
 
                 val navigator = CompatibilityDependencyNavigator(graphNavigator, treeNavigator)
 
-                navigator.directDependencies(graphProject, scopeName) shouldBe dependencies
+                navigator.directDependencies(graphProject, scopeName) shouldContainExactly dependencies
             }
         }
 
@@ -152,7 +151,7 @@ class CompatibilityDependencyNavigatorTest : WordSpec() {
                 val treeNavigator = mockk<DependencyNavigator>()
                 val graphNavigator = mockk<DependencyNavigator>()
                 every {
-                    treeNavigator.dependenciesForScope(
+                    treeNavigator.scopeDependencies(
                         treeProject,
                         scopeName,
                         maxDepth,
@@ -162,7 +161,7 @@ class CompatibilityDependencyNavigatorTest : WordSpec() {
 
                 val navigator = CompatibilityDependencyNavigator(graphNavigator, treeNavigator)
 
-                navigator.dependenciesForScope(treeProject, scopeName, maxDepth, matcher) shouldBe dependencies
+                navigator.scopeDependencies(treeProject, scopeName, maxDepth, matcher) shouldBe dependencies
             }
 
             "return the dependencies of a dependency graph project" {
@@ -173,7 +172,7 @@ class CompatibilityDependencyNavigatorTest : WordSpec() {
                 val treeNavigator = mockk<DependencyNavigator>()
                 val graphNavigator = mockk<DependencyNavigator>()
                 every {
-                    graphNavigator.dependenciesForScope(
+                    graphNavigator.scopeDependencies(
                         graphProject,
                         scopeName,
                         maxDepth,
@@ -183,7 +182,7 @@ class CompatibilityDependencyNavigatorTest : WordSpec() {
 
                 val navigator = CompatibilityDependencyNavigator(graphNavigator, treeNavigator)
 
-                navigator.dependenciesForScope(graphProject, scopeName, maxDepth, matcher) shouldBe dependencies
+                navigator.scopeDependencies(graphProject, scopeName, maxDepth, matcher) shouldBe dependencies
             }
         }
 
@@ -225,15 +224,13 @@ class CompatibilityDependencyNavigatorTest : WordSpec() {
     }
 }
 
-/**
- * Construct an [OrtResult] that contains the given [projects].
- */
+/** Construct an [OrtResult] that contains the given [projects]. */
 private fun createOrtResult(vararg projects: Project): OrtResult =
     OrtResult.EMPTY.copy(
         analyzer = AnalyzerRun.EMPTY.copy(
             result = AnalyzerResult(
-                projects = sortedSetOf(*projects),
-                packages = sortedSetOf(),
+                projects = setOf(*projects),
+                packages = emptySet(),
                 dependencyGraphs = mapOf("test" to DependencyGraph())
             )
         )
@@ -243,19 +240,14 @@ private fun createOrtResult(vararg projects: Project): OrtResult =
  * Create a [Project] with an identifier derived from the given [name] that has the dependency information passed as
  * [scopes] or [scopeNames].
  */
-private fun createProject(
-    name: String,
-    scopes: SortedSet<Scope>? = null,
-    scopeNames: SortedSet<String>? = null
-): Project {
+private fun createProject(name: String, scopes: Set<Scope>? = null, scopeNames: Set<String>? = null): Project {
     val id = Identifier.EMPTY.copy(name = name)
     return Project.EMPTY.copy(id = id, scopeDependencies = scopes, scopeNames = scopeNames)
 }
 
-/**
- * Create a [Scope] with the given [name] and a synthetic dependency.
- */
-private fun createScope(name: String): Scope {
-    val dependencies = sortedSetOf(PackageReference(Identifier.EMPTY.copy(name = "dep$name")))
-    return Scope(name, dependencies)
-}
+/** Create a [Scope] with the given [name] and a synthetic dependency. */
+private fun createScope(name: String) =
+    Scope(
+        name = name,
+        dependencies = setOf(PackageReference(Identifier.EMPTY.copy(name = "dep$name")))
+    )

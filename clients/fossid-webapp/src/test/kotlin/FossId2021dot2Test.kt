@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,41 +17,49 @@
  * License-Filename: LICENSE
  */
 
+package org.ossreviewtoolkit.clients.fossid
+
 import com.github.tomakehurst.wiremock.WireMockServer
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration
 
 import io.kotest.core.spec.style.StringSpec
 import io.kotest.matchers.nulls.shouldNotBeNull
+import io.kotest.matchers.should
 import io.kotest.matchers.shouldBe
-import io.kotest.matchers.types.shouldBeInstanceOf
+import io.kotest.matchers.types.beInstanceOf
 
-import org.ossreviewtoolkit.clients.fossid.FossIdRestService
-import org.ossreviewtoolkit.clients.fossid.FossIdServiceWithVersion
-import org.ossreviewtoolkit.clients.fossid.VersionedFossIdService2021dot2
-import org.ossreviewtoolkit.clients.fossid.checkResponse
+import io.mockk.clearAllMocks
+import io.mockk.coEvery
+import io.mockk.mockkObject
+
 import org.ossreviewtoolkit.clients.fossid.model.status.ScanStatus
 
 private const val PROJECT_CODE = "semver4j"
 private const val SCAN_CODE_2021_2 = "${PROJECT_CODE}_20201203_090342_21.2"
 
-/**
- * This client test tests the calls that have been changed for FossID 2021.2.
- */
+/** This client test tests the calls that have been changed for FossID 2021.2. */
 class FossId2021dot2Test : StringSpec({
     val server = WireMockServer(
         WireMockConfiguration.options()
             .dynamicPort()
-            .usingFilesUnderDirectory("src/test/assets/2021.2")
+            .usingFilesUnderClasspath("2021.2")
     )
     lateinit var service: FossIdServiceWithVersion
 
     beforeSpec {
         server.start()
-        service = FossIdRestService.createService("http://localhost:${server.port()}")
+
+        mockkObject(FossIdServiceWithVersion)
+        coEvery { FossIdServiceWithVersion.create(any()) } answers {
+            VersionedFossIdService2021dot2(firstArg(), "2021.2.2")
+        }
+
+        service = FossIdRestService.create("http://localhost:${server.port()}")
     }
 
     afterSpec {
         server.stop()
+        clearAllMocks()
     }
 
     beforeTest {
@@ -60,13 +68,14 @@ class FossId2021dot2Test : StringSpec({
 
     "Version can be parsed of login page (2021.2)" {
         service.version shouldBe "2021.2.2"
-        service.shouldBeInstanceOf<VersionedFossIdService2021dot2>()
+        service should beInstanceOf<VersionedFossIdService2021dot2>()
     }
 
     "Scan status can be queried (2021.2)" {
-        // because the service caches the version, we must recreate it
-        service = FossIdServiceWithVersion.instance(service)
-        service.checkScanStatus("", "", SCAN_CODE_2021_2).shouldNotBeNull().run {
+        // Recreate the version as the service caches it.
+        service = FossIdServiceWithVersion.create(service)
+
+        service.checkScanStatus("", "", SCAN_CODE_2021_2) shouldNotBeNull {
             checkResponse("get scan status")
 
             data.shouldNotBeNull().status shouldBe ScanStatus.FINISHED

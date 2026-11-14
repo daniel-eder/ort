@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,26 +45,17 @@ interface DependencyNavigator {
          */
         val MATCH_ALL: DependencyMatcher = { true }
 
-        /**
-         * A pre-defined [DependencyMatcher] that matches only dependencies with a linkage indicating subprojects.
-         */
-        private val MATCH_SUB_PROJECTS: DependencyMatcher = { node ->
+        /** A pre-defined [DependencyMatcher] that matches only dependencies with a linkage indicating subprojects. */
+        val MATCH_SUB_PROJECTS: DependencyMatcher = { node ->
             node.linkage in PackageLinkage.PROJECT_LINKAGE
         }
 
         /**
-         * Return a set with all the [Identifier]s contained in the given map of scope dependencies. This is useful if
-         * all dependencies are needed independent of the scope they belong to.
-         */
-        private fun Map<String, Set<Identifier>>.collectDependencies(): Set<Identifier> =
-            values.flatMapTo(mutableSetOf()) { it }
-
-        /**
-         * Return a map with all [OrtIssue]s found in the dependency graph spawned by [dependencies] grouped by their
+         * Return a map with all [Issue]s found in the dependency graph spawned by [dependencies] grouped by their
          * [Identifier]s.
          */
-        fun collectIssues(dependencies: Sequence<DependencyNode>): Map<Identifier, Set<OrtIssue>> {
-            val collectedIssues = mutableMapOf<Identifier, MutableSet<OrtIssue>>()
+        fun collectIssues(dependencies: Sequence<DependencyNode>): Map<Identifier, Set<Issue>> {
+            val collectedIssues = mutableMapOf<Identifier, MutableSet<Issue>>()
 
             fun addIssues(nodes: Sequence<DependencyNode>) {
                 nodes.forEach { node ->
@@ -82,9 +73,7 @@ interface DependencyNavigator {
         }
     }
 
-    /**
-     * Return a set with the names of all the scopes defined for the given [project].
-     */
+    /** Return a set with the names of all the scopes defined for the given [project]. */
     fun scopeNames(project: Project): Set<String>
 
     /**
@@ -94,11 +83,11 @@ interface DependencyNavigator {
     fun directDependencies(project: Project, scopeName: String): Sequence<DependencyNode>
 
     /**
-     * Return a set with information of the dependencies of a specific [scope][scopeName] of a [project]. With
-     * [maxDepth] the depth of the dependency tree to be traversed can be restricted; negative values mean that there
-     * is no restriction. Use the specified [matcher] to filter for specific dependencies.
+     * Return a set with the [Identifier]s of the dependencies of a [scope][scopeName] of a [project]. With [maxDepth]
+     * the depth of the dependency tree to be traversed can be restricted; negative values mean that there is no
+     * restriction. Use the specified [matcher] to filter for specific dependencies.
      */
-    fun dependenciesForScope(
+    fun scopeDependencies(
         project: Project,
         scopeName: String,
         maxDepth: Int = -1,
@@ -106,16 +95,15 @@ interface DependencyNavigator {
     ): Set<Identifier>
 
     /**
-     * Return a map with information of the dependencies of a [project] grouped by scopes. This is equivalent to
-     * calling [dependenciesForScope] for all the scopes of the given [project]. (This base implementation does
-     * exactly this.)
+     * Return a set with the [Identifier]s of the dependencies of a [project]. This is equivalent to calling
+     * [scopeDependencies] for all the scopes of the given [project].
      */
-    fun scopeDependencies(
+    fun projectDependencies(
         project: Project,
         maxDepth: Int = -1,
         matcher: DependencyMatcher = MATCH_ALL
-    ): Map<String, Set<Identifier>> =
-        scopeNames(project).associateWith { dependenciesForScope(project, it, maxDepth, matcher) }
+    ): Set<Identifier> =
+        scopeNames(project).flatMapTo(mutableSetOf()) { scopeDependencies(project, it, maxDepth, matcher) }
 
     /**
      * Return a set with the [Identifier]s of packages that are dependencies of the package with the given [packageId]
@@ -136,100 +124,85 @@ interface DependencyNavigator {
      * direct dependencies the shortest path is empty. The resulting map has scope names as keys; the values are maps
      * with the shorted paths to all the dependencies contained in that scope.
      */
-    fun getShortestPaths(project: Project): Map<String, Map<Identifier, List<Identifier>>> {
-        val pathMap = mutableMapOf<String, Map<Identifier, List<Identifier>>>()
-
-        scopeNames(project).forEach { scope ->
-            pathMap[scope] = getShortestPathForScope(project, scope)
+    fun getShortestPaths(project: Project): Map<String, Map<Identifier, List<Identifier>>> =
+        scopeNames(project).associateWith { scope ->
+            getShortestPathForScope(project, scope)
         }
-
-        return pathMap
-    }
-
-    /**
-     * Return the set of [Identifier]s that refer to subprojects of the given [project].
-     */
-    fun collectSubProjects(project: Project): Set<Identifier> =
-        scopeDependencies(project, matcher = MATCH_SUB_PROJECTS).collectDependencies()
-
-    /**
-     * Return a set with the [Identifier]s of all dependencies of the given [project] across all scopes. As usual,
-     * it is possible to restrict the dependencies to be fetched with [maxDepth] and [matcher].
-     */
-    fun projectDependencies(
-        project: Project,
-        maxDepth: Int = -1,
-        matcher: DependencyMatcher = MATCH_ALL
-    ): Set<Identifier> =
-        scopeDependencies(project, maxDepth, matcher).collectDependencies()
 
     /**
      * Return the depth of the dependency tree rooted at the given [project] associated with this [scopeName]. If the
      * scope cannot be resolved, return -1.
      */
     fun dependencyTreeDepth(project: Project, scopeName: String): Int =
-        getTreeDepthRecursive(directDependencies(project, scopeName))
+        getTreeDepthRecursive(directDependencies(project, scopeName), mutableMapOf())
 
-    /**
-     * Return a map of all de-duplicated [OrtIssue]s associated by [Identifier] for the given [project].
-     */
-    fun projectIssues(project: Project): Map<Identifier, Set<OrtIssue>> =
+    /** Return a map of all de-duplicated [Issue]s associated by [Identifier] for the given [project]. */
+    fun projectIssues(project: Project): Map<Identifier, Set<Issue>> =
         collectIssues(scopeNames(project).asSequence().flatMap { directDependencies(project, it) })
 
     /**
      * Determine the map of the shortest paths for all the dependencies of a [project], given its map of
-     * [scopeDependencies].
+     * [projectDependencies].
      */
-    private fun getShortestPathForScope(
-        project: Project,
-        scope: String
-    ): Map<Identifier, List<Identifier>> =
-        getShortestPathsForScope(directDependencies(project, scope), dependenciesForScope(project, scope))
-
-    /**
-     * Determine the map of the shortest paths for a specific scope given its direct dependency [nodes] and a set with
-     * [allDependencies].
-     */
-    private fun getShortestPathsForScope(
-        nodes: Sequence<DependencyNode>,
-        allDependencies: Set<Identifier>
-    ): Map<Identifier, List<Identifier>> {
-        data class QueueItem(
-            val pkgRef: DependencyNode,
-            val parents: List<Identifier>
-        )
-
-        val remainingIds = allDependencies.toMutableSet()
-        val queue = LinkedList<QueueItem>()
-        val result = sortedMapOf<Identifier, List<Identifier>>()
-
-        nodes.forEach { queue.offer(QueueItem(it.getStableReference(), emptyList())) }
-
-        while (queue.isNotEmpty()) {
-            val item = queue.poll()
-            if (item.pkgRef.id in remainingIds) {
-                result[item.pkgRef.id] = item.parents
-                remainingIds -= item.pkgRef.id
-            }
-
-            val newParents = item.parents + item.pkgRef.id
-            item.pkgRef.visitDependencies { dependencyNodes ->
-                dependencyNodes.forEach { node -> queue.offer(QueueItem(node.getStableReference(), newParents)) }
-            }
-        }
-
-        require(remainingIds.isEmpty()) {
-            "Could not find the shortest path for these dependencies: ${remainingIds.joinToString()}"
-        }
-
-        return result
+    private fun getShortestPathForScope(project: Project, scope: String): Map<Identifier, List<Identifier>> {
+        val directDependencies = directDependencies(project, scope)
+        return getShortestPathsForScope(directDependencies)
     }
 
     /**
-     * Traverse the given sequence of [dependencies] recursively to determine the depth of the dependency tree.
+     * Traverse the given sequence of [dependencies] recursively to determine the depth of the dependency tree. Use
+     * [depthCache] to avoid traversing subtrees for nodes that have already been visited, as the same node can be
+     * reached via different paths through the dependency graph.
      */
-    private fun getTreeDepthRecursive(dependencies: Sequence<DependencyNode>): Int =
+    private fun getTreeDepthRecursive(dependencies: Sequence<DependencyNode>, depthCache: MutableMap<Any, Int>): Int =
         dependencies.map { dependency ->
-            1 + dependency.visitDependencies { getTreeDepthRecursive(it) }
+            depthCache.getOrPut(dependency.getInternalId()) {
+                1 + dependency.visitDependencies { getTreeDepthRecursive(it, depthCache) }
+            }
         }.maxOrNull() ?: 0
+}
+
+private data class QueueItem(
+    val node: DependencyNode,
+    val predecessorNode: DependencyNode?
+)
+
+/** Determine the map of the shortest paths for a specific scope given its direct dependency [nodes]. */
+private fun getShortestPathsForScope(nodes: Sequence<DependencyNode>): Map<Identifier, List<Identifier>> {
+    // A node is visited if it is a key in this map.
+    val predecessorForVisitedNode = mutableMapOf<DependencyNode, DependencyNode?>()
+    // Keep track of the end-points of the shortest paths to speed up the re-construction.
+    val firstVisitedNodeForId = mutableMapOf<Identifier, DependencyNode>()
+    val queue = nodes.mapTo(LinkedList()) { QueueItem(it.getStableReference(), null) }
+
+    while (queue.isNotEmpty()) {
+        val (node, predecessorNode) = queue.poll()
+        if (node in predecessorForVisitedNode) continue
+
+        predecessorForVisitedNode[node] = predecessorNode
+        // Once any node with a particular identifier is visited, the endpoint of the shortest path to that
+        // identifier is known to be that visited node.
+        firstVisitedNodeForId.putIfAbsent(node.id, node)
+
+        node.visitDependencies { dependencyNodes ->
+            dependencyNodes.forEach { dependencyNode ->
+                val ref = dependencyNode.getStableReference()
+                if (ref !in predecessorForVisitedNode) {
+                    queue.offer(QueueItem(ref, node))
+                }
+            }
+        }
+    }
+
+    // Reconstruct the shortest paths.
+    return firstVisitedNodeForId.mapValues { (_, node) ->
+        LinkedList<Identifier>().apply {
+            var current = predecessorForVisitedNode[node]
+
+            while (current != null) {
+                addFirst(current.id)
+                current = predecessorForVisitedNode[current]
+            }
+        }
+    }
 }

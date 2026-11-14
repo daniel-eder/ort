@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,76 +23,106 @@ import com.fasterxml.jackson.annotation.JsonInclude
 
 import org.ossreviewtoolkit.model.ArtifactProvenance
 import org.ossreviewtoolkit.model.Identifier
+import org.ossreviewtoolkit.model.Package
+import org.ossreviewtoolkit.model.Project
 import org.ossreviewtoolkit.model.Provenance
 import org.ossreviewtoolkit.model.RepositoryProvenance
-import org.ossreviewtoolkit.model.UnknownProvenance
+import org.ossreviewtoolkit.model.SourceCodeOrigin
 import org.ossreviewtoolkit.model.VcsInfo
 import org.ossreviewtoolkit.model.VcsType
+import org.ossreviewtoolkit.model.utils.hasIvyVersionRange
+import org.ossreviewtoolkit.model.utils.isApplicableIvyVersion
+import org.ossreviewtoolkit.utils.common.equalsOrIsBlank
 import org.ossreviewtoolkit.utils.common.replaceCredentialsInUri
 
 /**
- * A configuration for a specific package and provenance. It allows to set up [PathExclude]s and
- * [LicenseFindingCuration]s, similar to how it is done via the [RepositoryConfiguration] for projects.
+ * A class used in the [OrtConfiguration] to configure [PathExclude]s and [LicenseFindingCuration]s for a specific
+ * [Package]'s [Identifier] (and [Provenance]).
+ * Note that [PathExclude]s and [LicenseFindingCuration]s for [Project]s are configured by a [RepositoryConfiguration]'s
+ * [excludes][RepositoryConfiguration.excludes] and [curations][RepositoryConfiguration.curations] properties instead.
  */
 data class PackageConfiguration(
     /**
-     * The identifier of the package this configuration applies to.
+     * The [Identifier] which must match with the identifier of the package in order for this package curation to apply.
+     * The [version][Identifier.version] can be either:
+     * - blank, to match any version,
+     * - a plain version string matched for equality,
+     * - an [Ivy-style version matcher](https://ant.apache.org/ivy/history/2.6.0/settings/version-matchers.html).
+     * If the package's version is blank, it matches regardless of the version set here.
+     * The other components of the [identifier][id] are matched by equality.
      */
     val id: Identifier,
 
-    /**
-     * The source artifact this configuration applies to.
-     */
+    /** The source artifact this configuration applies to. */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     val sourceArtifactUrl: String? = null,
 
-    /**
-     * The vcs and revision this configuration applies to.
-     */
+    /** The vcs and revision this configuration applies to. */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     val vcs: VcsMatcher? = null,
 
-    /**
-     * Path excludes.
-     */
+    /** The source code origin this configuration applies to. */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    val sourceCodeOrigin: SourceCodeOrigin? = null,
+
+    /** Path excludes. */
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
     val pathExcludes: List<PathExclude> = emptyList(),
 
-    /**
-     * License finding curations.
-     */
+    /** License finding curations. */
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
     val licenseFindingCurations: List<LicenseFindingCuration> = emptyList()
 ) {
     init {
-        require((sourceArtifactUrl == null) xor (vcs == null)) {
-            "A package configuration can either apply to a source artifact or to a VCS, not to neither or both."
+        require(
+            listOfNotNull(sourceArtifactUrl, vcs, sourceCodeOrigin).size <= 1
+        ) {
+            "A package configuration must contain at most one of 'sourceArtifactUrl', 'vcs' or 'sourceCodeOrigin'."
+        }
+
+        if (id.hasIvyVersionRange()) {
+            require(vcs == null && sourceArtifactUrl == null) {
+                "A package configuration for '${id.toCoordinates()}' has both a version range matcher and a 'vcs' or " +
+                    "'sourceArtifactUrl' matcher, which is not allowed."
+            }
         }
     }
 
     fun matches(otherId: Identifier, provenance: Provenance): Boolean {
-        if (id != otherId) return false
-
-        return when (provenance) {
-            is UnknownProvenance -> false
-            is ArtifactProvenance -> sourceArtifactUrl != null && sourceArtifactUrl == provenance.sourceArtifact.url
-            is RepositoryProvenance -> vcs != null && vcs.matches(provenance)
+        @Suppress("ComplexCondition")
+        if (!id.type.equals(otherId.type, ignoreCase = true) ||
+            id.namespace != otherId.namespace ||
+            id.name != otherId.name ||
+            !(id.version.equalsOrIsBlank(otherId.version) || id.isApplicableIvyVersion(otherId))
+        ) {
+            return false
         }
+
+        if (sourceCodeOrigin != null) {
+            return when (sourceCodeOrigin) {
+                SourceCodeOrigin.VCS -> provenance is RepositoryProvenance
+                SourceCodeOrigin.ARTIFACT -> provenance is ArtifactProvenance
+            }
+        }
+
+        if (sourceArtifactUrl != null) {
+            return provenance is ArtifactProvenance && sourceArtifactUrl == provenance.sourceArtifact.url
+        }
+
+        if (vcs != null) {
+            return provenance is RepositoryProvenance && vcs.matches(provenance)
+        }
+
+        return true
     }
 }
 
-/**
- * A matcher which matches its properties against a [RepositoryProvenance].
- */
+/** A matcher which matches its properties against a [RepositoryProvenance]. */
 data class VcsMatcher(
-    /**
-     * The [type] to match for equality against [VcsInfo.type].
-     */
+    /** The [type] to match for equality against [VcsInfo.type]. */
     val type: VcsType,
 
-    /**
-     * The [url] to match for equality against [VcsInfo.url].
-     */
+    /** The [url] to match for equality against [VcsInfo.url]. */
     val url: String,
 
     /**
@@ -108,7 +138,7 @@ data class VcsMatcher(
 
     fun matches(provenance: RepositoryProvenance): Boolean =
         type == provenance.vcsInfo.type &&
-                // URLs need to match only after any credentials have been removed.
-                url.replaceCredentialsInUri() == provenance.vcsInfo.url.replaceCredentialsInUri() &&
-                (revision == null || revision == provenance.resolvedRevision)
+            // URLs need to match only after any credentials have been removed.
+            url.replaceCredentialsInUri() == provenance.vcsInfo.url.replaceCredentialsInUri() &&
+            (revision == null || revision == provenance.resolvedRevision)
 }

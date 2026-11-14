@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,48 +20,40 @@
 package org.ossreviewtoolkit.model
 
 import com.fasterxml.jackson.annotation.JsonInclude
+import com.fasterxml.jackson.databind.annotation.JsonSerialize
 
 import java.util.Deque
 import java.util.LinkedList
-import java.util.SortedSet
 
-// A custom value filter for [PackageLinkage] to work around
-// https://github.com/FasterXML/jackson-module-kotlin/issues/193.
-@Suppress("EqualsOrHashCode", "EqualsWithHashCodeExist")
-class PackageLinkageValueFilter {
-    override fun equals(other: Any?) = other == PackageLinkage.DYNAMIC
-}
+import org.ossreviewtoolkit.model.utils.PackageLinkageValueFilter
+import org.ossreviewtoolkit.model.utils.PackageReferenceSortedSetConverter
 
 /**
  * A human-readable reference to a software [Package]. Each package reference itself refers to other package
  * references that are dependencies of the package.
  */
-// Do not serialize default values to reduce the size of the result file.
-@JsonInclude(JsonInclude.Include.NON_DEFAULT)
+@JsonInclude(JsonInclude.Include.NON_EMPTY)
 data class PackageReference(
-    /**
-     * The identifier of the package.
-     */
+    /** The identifier of the package. */
     override val id: Identifier,
 
     /**
-     * The type of linkage used for the referred package from its dependent package. As most of our supported
+     * The type of linkage used for the referred package from its dependent package. As most of ORT's supported
      * package managers / languages only support dynamic linking or at least default to it, also use that as the
-     * default value here to not blow up our result files.
+     * default value here to not blow up ORT result files.
      */
-    @JsonInclude(value = JsonInclude.Include.CUSTOM, valueFilter = PackageLinkageValueFilter::class)
+    @JsonInclude(JsonInclude.Include.CUSTOM, valueFilter = PackageLinkageValueFilter::class)
     override val linkage: PackageLinkage = PackageLinkage.DYNAMIC,
 
     /**
      * The set of [references to packages][PackageReference] this package depends on. Note that this list depends on the
      * [scope][Scope] in which this package is referenced.
      */
-    val dependencies: SortedSet<PackageReference> = sortedSetOf(),
+    @JsonSerialize(converter = PackageReferenceSortedSetConverter::class)
+    val dependencies: Set<PackageReference> = emptySet(),
 
-    /**
-     * A list of [OrtIssue]s that occurred handling this [PackageReference].
-     */
-    override val issues: List<OrtIssue> = emptyList()
+    /** A list of [Issue]s that occurred handling this [PackageReference]. */
+    override val issues: List<Issue> = emptyList()
 ) : Comparable<PackageReference>, DependencyNode {
     /**
      * Return the set of [Identifier]s the package referred by this [PackageReference] transitively depends on,
@@ -76,13 +68,15 @@ data class PackageReference(
         val result = mutableSetOf<Identifier>()
 
         val queue: Deque<Pair<PackageReference, Int>> = LinkedList()
+
         fun enqueue(packages: Collection<PackageReference>, level: Int) {
-            if (maxDepth < 0 || level <= maxDepth) {
+            if (maxDepth !in 0..<level) {
                 packages.forEach { queue += Pair(it, level) }
             }
         }
 
         enqueue(dependencies, 1)
+
         while (queue.isNotEmpty()) {
             val (pkg, level) = queue.removeFirst()
 
@@ -100,31 +94,23 @@ data class PackageReference(
      */
     override fun compareTo(other: PackageReference) = id.compareTo(other.id)
 
-    /**
-     * Return whether the package identified by [id] is a (transitive) dependency of this reference.
-     */
+    /** Return whether the package identified by [id] is a (transitive) dependency of this reference. */
     fun dependsOn(id: Identifier): Boolean = dependencies.any { it.id == id || it.dependsOn(id) }
 
-    /**
-     * Return all references to [id] as a dependency.
-     */
+    /** Return all references to [id] as a dependency. */
     fun findReferences(id: Identifier): List<PackageReference> =
         dependencies.filter { it.id == id } + dependencies.flatMap { it.findReferences(id) }
-
-    /**
-     * Return whether this package reference or any of its dependencies has issues.
-     */
-    fun hasIssues(): Boolean = issues.isNotEmpty() || dependencies.any { it.hasIssues() }
 
     /**
      * Apply the provided [transform] to each node in the dependency tree represented by this [PackageReference] and
      * return the modified [PackageReference]. The tree is traversed depth-first (post-order).
      */
     fun traverse(transform: (PackageReference) -> PackageReference): PackageReference {
-        val transformedDependencies = dependencies.map {
+        val transformedDependencies = dependencies.mapTo(mutableSetOf()) {
             it.traverse(transform)
         }
-        return transform(copy(dependencies = transformedDependencies.toSortedSet()))
+
+        return transform(copy(dependencies = transformedDependencies))
     }
 
     override fun <T> visitDependencies(block: (Sequence<DependencyNode>) -> T): T = block(dependencies.asSequence())

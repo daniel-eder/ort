@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,66 +19,16 @@
 
 package org.ossreviewtoolkit.analyzer
 
-import java.io.File
-import java.nio.file.FileSystems
-import java.nio.file.PathMatcher
 import java.util.ServiceLoader
 
-import org.ossreviewtoolkit.model.config.AnalyzerConfiguration
-import org.ossreviewtoolkit.model.config.RepositoryConfiguration
+import org.ossreviewtoolkit.plugins.api.PluginFactory
 
-/**
- * A common interface for use with [ServiceLoader] that all [AbstractPackageManagerFactory] classes need to implement.
- */
-interface PackageManagerFactory {
-    /**
-     * The name to use to refer to the package manager.
-     */
-    val managerName: String
-
-    /**
-     * The glob matchers for all definition files.
-     */
-    val matchersForDefinitionFiles: List<PathMatcher>
-
-    /**
-     * Create a [PackageManager] for analyzing the [analysisRoot] directory using the specified [analyzerConfig] and
-     * [repoConfig].
-     */
-    fun create(
-        analysisRoot: File,
-        analyzerConfig: AnalyzerConfiguration,
-        repoConfig: RepositoryConfiguration
-    ): PackageManager
-}
-
-/**
- * A generic factory class for a [PackageManager].
- */
-abstract class AbstractPackageManagerFactory<out T : PackageManager>(
-    override val managerName: String
-) : PackageManagerFactory {
-    /**
-     * The prioritized list of glob patterns of definition files supported by this package manager. Only all matches of
-     * the first glob having any matches are considered.
-     */
-    abstract val globsForDefinitionFiles: List<String>
-
-    override val matchersForDefinitionFiles by lazy {
-        globsForDefinitionFiles.map {
-            FileSystems.getDefault().getPathMatcher("glob:**/$it")
-        }
+/** A common interface for use with [ServiceLoader] that all [PackageManagerFactory] classes need to implement. */
+interface PackageManagerFactory : PluginFactory<PackageManager> {
+    companion object {
+        /**
+         * All [package manager factories][PackageManagerFactory] available in the classpath, associated by their names.
+         */
+        val ALL by lazy { PluginFactory.getAll<PackageManagerFactory, PackageManager>() }
     }
-
-    abstract override fun create(
-        analysisRoot: File,
-        analyzerConfig: AnalyzerConfiguration,
-        repoConfig: RepositoryConfiguration
-    ): T
-
-    /**
-     * Return the package manager's name here to allow Clikt to display something meaningful when listing the
-     * package managers which are enabled by default via their factories.
-     */
-    override fun toString() = managerName
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2019 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2019 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,14 +26,10 @@ import com.fasterxml.jackson.annotation.JsonInclude
  * do not have any specific semantic, but users are free to define their own set of categories.
  */
 data class LicenseCategory(
-    /**
-     * The name of this [LicenseCategory]. The name can be chosen freely, but must be unique over all categories.
-     */
+    /** The name of this [LicenseCategory]. The name can be chosen freely, but must be unique over all categories. */
     val name: String,
 
-    /**
-     * A description for this [LicenseCategory].
-     */
+    /** A description for this [LicenseCategory]. */
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
     val description: String = ""
 ) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2020 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,25 +23,18 @@ import com.fasterxml.jackson.annotation.JsonInclude
 
 import java.time.Instant
 
-/**
- * A short summary of the advisor result.
- */
+/** A short summary of the advisor result. */
 data class AdvisorSummary(
-    /**
-     * The time when the advisor started.
-     */
+    /** The time when the advisor started. */
     val startTime: Instant,
 
-    /**
-     * The time when the advisor finished.
-     */
+    /** The time when the advisor finished. */
     val endTime: Instant,
 
     /**
      * The list of issues that occurred during the advisor run.
-     * This property is not serialized if the list is empty to reduce the size of the result file. If there are no
-     * issues at all, [AdvisorRecord.hasIssues] already contains that information.
+     * This property is not serialized if the list is empty to reduce the size of the result file.
      */
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
-    val issues: List<OrtIssue> = emptyList()
+    val issues: List<Issue> = emptyList()
 )

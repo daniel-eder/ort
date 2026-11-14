@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,18 +25,17 @@ import org.ossreviewtoolkit.model.licenses.LicenseFindingCurationResult
 import org.ossreviewtoolkit.utils.common.FileMatcher
 import org.ossreviewtoolkit.utils.spdx.SpdxConstants
 
-/**
- * A class for matching and applying [LicenseFindingCuration]s to [LicenseFinding]s.
- */
+/** A class for matching and applying [LicenseFindingCuration]s to [LicenseFinding]s. */
 class FindingCurationMatcher {
     private fun isPathMatching(
         finding: LicenseFinding,
         curation: LicenseFindingCuration,
         relativeFindingPath: String
-    ): Boolean = FileMatcher.match(
-        pattern = curation.path,
-        path = finding.location.prependPath(relativeFindingPath)
-    )
+    ): Boolean =
+        FileMatcher.matches(
+            pattern = curation.path,
+            path = finding.location.prependedPath(relativeFindingPath)
+        )
 
     private fun isStartLineMatching(finding: LicenseFinding, curation: LicenseFindingCuration): Boolean =
         curation.startLines.isEmpty() || curation.startLines.any { it == finding.location.startLine }
@@ -48,18 +47,18 @@ class FindingCurationMatcher {
         curation.detectedLicense == null || curation.detectedLicense == finding.license
 
     /**
-     * Return true if and only if the given [curation] is applicable to the given [finding]. The [relativeFindingPath]
-     * path is the path from the directory the [curation] is relative to, to the directory the [finding] is relative to.
+     * Return true if the given [curation] is applicable to the given [finding]. The [relativeFindingPath] path is the
+     * path from the directory the [curation] is relative to, to the directory the [finding] is relative to.
      */
     fun matches(finding: LicenseFinding, curation: LicenseFindingCuration, relativeFindingPath: String = ""): Boolean =
         isPathMatching(finding, curation, relativeFindingPath) &&
-                isStartLineMatching(finding, curation) &&
-                isLineCountMatching(finding, curation) &&
-                isDetectedLicenseMatching(finding, curation)
+            isStartLineMatching(finding, curation) &&
+            isLineCountMatching(finding, curation) &&
+            isDetectedLicenseMatching(finding, curation)
 
     /**
      * Return the curated finding if the given [curation] is applicable to the given [finding] or the given [finding]
-     * otherwise. Null is returned if and only if the given curation is applicable and its concluded license equals
+     * otherwise. Null is returned if the given curation is applicable and its concluded license equals
      * [SpdxConstants.NONE]. If the finding is relative to a subdirectory of the path that the curations are relative
      * to, this needs to be set in the [relativeFindingPath].
      */
@@ -68,16 +67,16 @@ class FindingCurationMatcher {
         curation: LicenseFindingCuration,
         relativeFindingPath: String = ""
     ): LicenseFinding? =
-        if (!matches(finding, curation, relativeFindingPath)) finding
-        else if (curation.concludedLicense.toString() == SpdxConstants.NONE) null
-        else finding.copy(license = curation.concludedLicense)
+        when {
+            !matches(finding, curation, relativeFindingPath) -> finding
+            curation.concludedLicense.toString() == SpdxConstants.NONE -> null
+            else -> finding.copy(license = curation.concludedLicense)
+        }
 
     /**
-     * Applies the given [curations] to the given [findings]. In case multiple curations match any given finding all
-     * curations are applied to the original finding, thus in this case there are multiple curated findings for one
-     * finding. If multiple curations lead to the same result, only one of them is contained in the returned map. If the
-     * findings are relative to a subdirectory of the path that the curations are relative to, this needs to be set in
-     * the [relativeFindingsPath].
+     * Applies the given [curations] to the given [findings]. In case a single finding is matched by multiple curations,
+     * only the first matching curation is applied to that finding. If the findings are relative to a subdirectory of
+     * the path that the curations are relative to, this needs to be set in the [relativeFindingsPath].
      */
     fun applyAll(
         findings: Collection<LicenseFinding>,
@@ -87,12 +86,13 @@ class FindingCurationMatcher {
         val result = mutableMapOf<LicenseFinding?, MutableList<Pair<LicenseFinding, LicenseFindingCuration>>>()
 
         findings.forEach { finding ->
-            val matchingCurations = curations.filter { matches(finding, it, relativeFindingsPath) }
-            if (matchingCurations.isNotEmpty()) {
-                matchingCurations.forEach { curation ->
-                    val curatedFinding = apply(finding, curation, relativeFindingsPath)
-                    result.getOrPut(curatedFinding) { mutableListOf() } += Pair(finding, curation)
-                }
+            val curation = curations.firstOrNull {
+                matches(finding, it, relativeFindingsPath)
+            }
+
+            if (curation != null) {
+                val curatedFinding = apply(finding, curation, relativeFindingsPath)
+                result.getOrPut(curatedFinding) { mutableListOf() } += Pair(finding, curation)
             } else {
                 result.getOrPut(finding) { mutableListOf() }
             }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,7 +45,7 @@ import io.mockk.verify
 import java.net.URI
 
 class JiraNotifierTest : WordSpec({
-    "createIssue" should {
+    "createIssue()" should {
         "succeed for valid input" {
             val project = createProject()
             val basicIssue = BasicIssue(URI(""), "$PROJECT_KEY-1", 1L)
@@ -65,7 +65,7 @@ class JiraNotifierTest : WordSpec({
                 avoidDuplicates = false
             )
 
-            resultIssue.shouldBeSuccess {
+            resultIssue shouldBeSuccess {
                 it.id shouldBe 1L
                 it.key shouldBe "${project.key}-${it.id}"
                 it.self shouldBe URI("")
@@ -97,7 +97,7 @@ class JiraNotifierTest : WordSpec({
                 avoidDuplicates = true
             )
 
-            resultIssue.shouldBeFailure {
+            resultIssue shouldBeFailure {
                 it.message shouldContain "more than 1 duplicate issues"
             }
 
@@ -197,13 +197,13 @@ class JiraNotifierTest : WordSpec({
                 avoidDuplicates = false
             )
 
-            result.shouldBeFailure {
+            result shouldBeFailure {
                 it.message shouldContain "'$issueType' is not valid"
             }
         }
     }
 
-    "changeAssignee" should {
+    "changeAssignee()" should {
         "succeed for valid input" {
             val restClient = createRestClient {
                 every { issueClient.updateIssue(any(), any()) } returns createVoidPromise()
@@ -229,7 +229,7 @@ class JiraNotifierTest : WordSpec({
         }
     }
 
-    "changeState" should {
+    "changeState()" should {
         "succeed for valid input" {
             val state = "Bug"
             val issue = createIssue(id = 1, summary = "Ticket summary")
@@ -276,8 +276,7 @@ private val ISSUE_TYPES = listOf(
     createIssueType("Improvement")
 )
 
-private fun createIssueType(name: String) =
-    IssueType(URI(""), 0L, name, false, "", URI(""))
+private fun createIssueType(name: String) = IssueType(URI(""), 0L, name, false, "", URI(""))
 
 private fun createRestClient(block: JiraRestClient.() -> Unit): JiraRestClient =
     mockk {

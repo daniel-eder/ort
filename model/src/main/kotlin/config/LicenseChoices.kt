@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,11 +24,9 @@ import com.fasterxml.jackson.annotation.JsonInclude
 
 import org.ossreviewtoolkit.model.Identifier
 import org.ossreviewtoolkit.utils.ort.ORT_REPO_CONFIG_FILENAME
-import org.ossreviewtoolkit.utils.spdx.model.SpdxLicenseChoice
+import org.ossreviewtoolkit.utils.spdxexpression.SpdxLicenseChoice
 
-/**
- * The license choices configured for a repository.
- */
+/** The license choices configured for a repository. */
 data class LicenseChoices(
     /**
      * [SpdxLicenseChoice]s that are applied to all packages in the repository. As the [SpdxLicenseChoice] is applied to
@@ -45,20 +43,32 @@ data class LicenseChoices(
     @JsonIgnore
     fun isEmpty() = packageLicenseChoices.isEmpty() && repositoryLicenseChoices.isEmpty()
 
+    /**
+     * Return the result of merging [other] into this [LicenseChoices].
+     * Entries of this [LicenseChoices] take precedence.
+     */
+    fun merge(other: LicenseChoices): LicenseChoices =
+        LicenseChoices(
+            repositoryLicenseChoices = (repositoryLicenseChoices + other.repositoryLicenseChoices).distinct(),
+            packageLicenseChoices = (packageLicenseChoices + other.packageLicenseChoices).distinct()
+        )
+
     init {
         val choicesWithoutGiven = repositoryLicenseChoices.filter { it.given == null }
         require(choicesWithoutGiven.isEmpty()) {
             "LicenseChoices ${choicesWithoutGiven.joinToString()} defined in $ORT_REPO_CONFIG_FILENAME are missing " +
-                    "the 'given' expression."
+                "the 'given' expression."
         }
     }
 }
 
-/**
- * [SpdxLicenseChoice]s defined for an artifact.
- */
+/** [SpdxLicenseChoice]s defined for an artifact. */
 data class PackageLicenseChoice(
     val packageId: Identifier,
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
     val licenseChoices: List<SpdxLicenseChoice> = emptyList()
 )
+
+fun LicenseChoices?.orEmpty() = this ?: LicenseChoices()
+
+operator fun LicenseChoices.plus(other: LicenseChoices): LicenseChoices = merge(other)

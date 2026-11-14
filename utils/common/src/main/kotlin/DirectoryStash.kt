@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,6 @@
  * License-Filename: LICENSE
  */
 
-@file:Suppress("Filename")
-
 package org.ossreviewtoolkit.utils.common
 
 import java.io.Closeable
@@ -26,61 +24,68 @@ import java.io.File
 import java.io.IOException
 import java.nio.file.StandardCopyOption
 
+import kotlin.io.path.copyToRecursively
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.moveTo
 
-import org.apache.logging.log4j.kotlin.Logging
+import org.apache.logging.log4j.kotlin.logger
+
+typealias FileStash = DirectoryStash
 
 /**
- * A convenience function that stashes directories using a [DirectoryStash] instance.
+ * A [Closeable] class which temporarily moves away or copies directories / [files] and moves them back on close. Any
+ * conflicting directory / file created at the location of an original directory / file is deleted before the original
+ * state is restored. If a specified directory / file did not exist on initialization, it will also not exist on close.
  */
-fun stashDirectories(vararg directories: File): Closeable = DirectoryStash(setOf(*directories))
+class DirectoryStash(files: Set<File>, copy: Boolean = false) : Closeable {
+    private val stash: Map<File, File?> = files.associateWith { original ->
+        // Check this on each iteration instead of filtering beforehand to properly handle parent / child directories.
+        if (!original.exists()) return@associateWith null
 
-/**
- * A Closable class which temporarily moves away directories and moves them back on close. Any conflicting directory
- * created at the location of an original directory is deleted before the original state is restored. If a specified
- * directory did not exist on initialization, it will also not exist on close.
- */
-private class DirectoryStash(directories: Set<File>) : Closeable {
-    private companion object : Logging
+        // Create a temporary directory to move the original directory / file into as a sibling of the original
+        // directory / file to ensure it resides on the same file system for being able to perform an atomic move.
+        val tempDir = createTempDirectory(original.parentFile.toPath(), ".stash").toFile()
 
-    private val stashedDirectories: Map<File, File?> = directories.associateWith { originalDir ->
-        // We need to check this on each iteration instead of filtering beforehand to properly handle parent / child
-        // directories.
-        if (originalDir.isDirectory) {
-            // Create a temporary directory to move directories as-is into.
-            val stashDir = createTempDirectory(originalDir.parentFile.toPath(), "stash").toFile()
+        val stash = tempDir / original.name
 
-            // Use a non-existing directory as the target to ensure the directory can be moved atomically.
-            val tempDir = stashDir.resolve(originalDir.name)
-
-            logger.info {
-                "Temporarily moving directory from '${originalDir.absolutePath}' to '${tempDir.absolutePath}'."
-            }
-
-            originalDir.toPath().moveTo(tempDir.toPath(), StandardCopyOption.ATOMIC_MOVE)
-
-            tempDir
-        } else {
-            null
+        logger.info {
+            val thing = if (original.isDirectory) "directory" else "file"
+            "Temporarily moving $thing from '${original.absolutePath}' to '${stash.absolutePath}'."
         }
+
+        if (copy) {
+            original.toPath().copyToRecursively(stash.toPath(), followLinks = false)
+        } else {
+            original.toPath().moveTo(stash.toPath(), StandardCopyOption.ATOMIC_MOVE)
+        }
+
+        stash
     }
 
     override fun close() {
-        // Restore directories in reverse order of stashing to properly handle parent / child directories.
-        stashedDirectories.keys.reversed().forEach { originalDir ->
-            originalDir.safeDeleteRecursively()
+        // Restore directories / files in reverse order of stashing to properly handle parent / child directories.
+        stash.keys.reversed().forEach { original ->
+            original.safeDeleteRecursively()
 
-            stashedDirectories[originalDir]?.let { tempDir ->
-                logger.info { "Moving back directory from '${tempDir.absolutePath}' to '${originalDir.absolutePath}'." }
+            stash[original]?.let { stashDir ->
+                stashDir.toPath().moveTo(original.toPath(), StandardCopyOption.ATOMIC_MOVE)
 
-                tempDir.toPath().moveTo(originalDir.toPath(), StandardCopyOption.ATOMIC_MOVE)
+                logger.info {
+                    val thing = if (original.isDirectory) "directory" else "file"
+                    "Moved back $thing from '${stashDir.absolutePath}' to '${original.absolutePath}'."
+                }
 
                 // Delete the top-level temporary directory which should be empty now.
-                if (!tempDir.parentFile.delete()) {
-                    throw IOException("Unable to delete the '${tempDir.parent}' directory.")
+                if (!stashDir.parentFile.delete()) {
+                    throw IOException("Unable to delete the '${stashDir.parent}' directory.")
                 }
             }
         }
     }
 }
+
+/** A convenience function that stashes directories / files using a [DirectoryStash] instance. */
+fun stashDirectories(vararg files: File, copy: Boolean = false): Closeable = DirectoryStash(setOf(*files), copy)
+
+/** A convenience function that stashes directories / files using a [DirectoryStash] instance. */
+fun stashFiles(vararg files: File, copy: Boolean = false): Closeable = FileStash(setOf(*files), copy)

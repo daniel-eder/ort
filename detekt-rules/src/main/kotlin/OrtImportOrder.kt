@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2020 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2020 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,29 +19,62 @@
 
 package org.ossreviewtoolkit.detekt
 
-import io.github.detekt.psi.absolutePath
+import com.intellij.core.CoreApplicationEnvironment
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.psi.PsiWhiteSpace
+import com.intellij.psi.impl.source.tree.PsiWhiteSpaceImpl
+import com.intellij.psi.impl.source.tree.TreeCopyHandler
 
-import io.gitlab.arturbosch.detekt.api.CodeSmell
-import io.gitlab.arturbosch.detekt.api.Config
-import io.gitlab.arturbosch.detekt.api.Debt
-import io.gitlab.arturbosch.detekt.api.Entity
-import io.gitlab.arturbosch.detekt.api.Issue
-import io.gitlab.arturbosch.detekt.api.Rule
-import io.gitlab.arturbosch.detekt.api.Severity
+import dev.detekt.api.Config
+import dev.detekt.api.Entity
+import dev.detekt.api.Finding
+import dev.detekt.api.Rule
+import dev.detekt.api.modifiedText
 
-import org.jetbrains.kotlin.com.intellij.psi.PsiWhiteSpace
+import org.jetbrains.kotlin.name.FqName
+import org.jetbrains.kotlin.name.Name
+import org.jetbrains.kotlin.psi.KtFile
 import org.jetbrains.kotlin.psi.KtImportDirective
 import org.jetbrains.kotlin.psi.KtImportList
+import org.jetbrains.kotlin.psi.KtPsiFactory
+import org.jetbrains.kotlin.psi.psiUtil.allChildren
+import org.jetbrains.kotlin.resolve.ImportPath
 
-class OrtImportOrder(config: Config) : Rule(config) {
+class OrtImportOrder(config: Config) : Rule(config, "Reports files that do not follow ORT's order for imports") {
+    init {
+        if (autoCorrect) {
+            // This extension is required to be able to modify the list of imports programmatically.
+            @Suppress("UnstableApiUsage")
+            CoreApplicationEnvironment.registerExtensionPoint(
+                ApplicationManager.getApplication().extensionArea,
+                TreeCopyHandler.EP_NAME,
+                TreeCopyHandler::class.java
+            )
+        }
+    }
+
     private val commonTopLevelDomains = listOf("com", "org", "io")
 
-    override val issue = Issue(
-        javaClass.simpleName,
-        Severity.Style,
-        "Reports files that do not follow ORT's order for imports",
-        Debt.FIVE_MINS
-    )
+    private lateinit var workingFile: KtFile
+
+    override fun visit(root: KtFile) {
+        // Create a writable copy of the file if auto-correct is enabled. For the general idea see:
+        // https://github.com/detekt/detekt/blob/v2.0.0-alpha.1/detekt-rules-ktlint-wrapper/src/main/kotlin/dev/detekt/rules/ktlintwrapper/KtlintRule.kt#L44-L58
+        workingFile = if (autoCorrect) {
+            KtPsiFactory(root.project).createPhysicalFile(
+                fileName = root.name,
+                text = root.modifiedText ?: root.text
+            )
+        } else {
+            root
+        }
+
+        super.visit(workingFile)
+
+        if (autoCorrect && workingFile.modificationStamp > 0) {
+            root.modifiedText = workingFile.text
+        }
+    }
 
     override fun visitImportList(importList: KtImportList) {
         super.visitImportList(importList)
@@ -55,10 +88,12 @@ class OrtImportOrder(config: Config) : Rule(config) {
         val importPaths = children.mapNotNull {
             when (val psi = it.psi) {
                 is KtImportDirective -> psi.importPath.toString()
+
                 // Between two imports there is a child PSI of type whitespace.
                 // For 'n' blank lines in between, the text of this child contains
                 // 'n + 1' line breaks. Thus, a single blank line is represented by "\n\n".
                 is PsiWhiteSpace -> if (psi.text == "\n\n") "" else null
+
                 else -> null
             }
         }
@@ -66,17 +101,39 @@ class OrtImportOrder(config: Config) : Rule(config) {
         val expectedImportOrder = createExpectedImportOrder(importPaths)
 
         if (importPaths != expectedImportOrder) {
-            val path = importList.containingKtFile.absolutePath()
-            val message = "Imports in file '$path' are not sorted alphabetically or single blank lines are missing " +
-                    "between different top-level packages"
-            val finding = CodeSmell(
-                issue,
-                // Use the message as the name to also see it in CLI output and not only in the report files.
-                Entity.from(importList).copy(name = message),
-                message
+            if (autoCorrect) fixImportListOrder(checkNotNull(workingFile.importList), expectedImportOrder)
+
+            val finding = Finding(
+                Entity.from(importList),
+                "Imports are not sorted alphabetically or single blank lines are missing between different top-level " +
+                    "packages"
             )
+
             report(finding)
         }
+    }
+
+    private fun fixImportListOrder(importList: KtImportList, expectedImportOrder: List<String>) {
+        val project = importList.project
+        val factory = KtPsiFactory(project)
+
+        // Remove all existing imports and re-add them in the expected order.
+        importList.allChildren.toList().forEach { it.delete() }
+        expectedImportOrder.forEach { importPath ->
+            if (importPath.isNotEmpty()) {
+                val import = importPath.substringBefore(" as ").trim()
+                val alias = importPath.substringAfter(" as ", "")
+                    .takeIf { it.isNotBlank() }?.let { Name.identifier(it.trim()) }
+                val importDirective = factory.createImportDirective(ImportPath(FqName(import), false, alias))
+                importList.add(importDirective)
+                importList.addNewLine()
+            } else {
+                importList.addNewLine()
+            }
+        }
+
+        // Ensure the last empty line is preserved.
+        if (expectedImportOrder.last().isNotEmpty()) importList.addNewLine()
     }
 
     private fun createExpectedImportOrder(importPaths: List<String>): List<String> {
@@ -88,12 +145,12 @@ class OrtImportOrder(config: Config) : Rule(config) {
 
         val sortedImportPathsWithDotAndBlankLines = createImportListWithBlankLines(importPathsWithDot)
 
-        if (importPathsWithoutDot.isNotEmpty()) {
-            expectedImportPaths += importPathsWithoutDot
-            expectedImportPaths += ""
-        }
+        expectedImportPaths += importPathsWithoutDot
+        if (expectedImportPaths.isNotEmpty()) expectedImportPaths += ""
 
         expectedImportPaths += sortedImportPathsWithDotAndBlankLines
+        if (expectedImportPaths.isNotEmpty()) expectedImportPaths.removeLast()
+
         return expectedImportPaths
     }
 
@@ -104,7 +161,6 @@ class OrtImportOrder(config: Config) : Rule(config) {
             pathsWithBlankLines += it.value
             pathsWithBlankLines += ""
         }
-        pathsWithBlankLines.removeLast()
 
         return pathsWithBlankLines
     }
@@ -121,3 +177,5 @@ class OrtImportOrder(config: Config) : Rule(config) {
         return topLevelName
     }
 }
+
+private fun KtImportList.addNewLine() = node.addChild(PsiWhiteSpaceImpl("\n"), null)

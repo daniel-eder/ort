@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,7 +29,7 @@ import com.atlassian.jira.rest.client.internal.async.AsynchronousJiraRestClientF
 
 import java.net.URI
 
-import org.apache.logging.log4j.kotlin.Logging
+import org.apache.logging.log4j.kotlin.logger
 
 import org.ossreviewtoolkit.model.config.JiraConfiguration
 import org.ossreviewtoolkit.utils.common.collectMessages
@@ -40,21 +40,15 @@ class JiraNotifier(private val restClient: JiraRestClient) {
             .createWithBasicHttpAuthentication(URI(config.host), config.username, config.password)
     )
 
-    companion object : Logging
-
-    /**
-     * Create a [comment] within the issue specified by the [issueKey].
-     */
-    @Suppress("UNUSED") // This is intended to be used via scripting.
+    /** Create a [comment] within the issue specified by the [issueKey]. */
+    @Suppress("unused") // This is intended to be used via scripting.
     fun createComment(issueKey: String, comment: String) {
         val issue = restClient.issueClient.getIssue(issueKey).claim()
 
         restClient.issueClient.addComment(issue.commentsUri, Comment.valueOf(comment)).claim()
     }
 
-    /**
-     * Change the [assignee] of the give issue specified by the [issueKey].
-     */
+    /** Change the [assignee] of the give issue specified by the [issueKey]. */
     fun changeAssignee(issueKey: String, assignee: String): Boolean {
         val input = IssueInputBuilder().setAssigneeName(assignee).build()
 
@@ -67,9 +61,7 @@ class JiraNotifier(private val restClient: JiraRestClient) {
         }.isSuccess
     }
 
-    /**
-     * Change the [state] of the given issue specified by the [issueKey].
-     */
+    /** Change the [state] of the given issue specified by the [issueKey]. */
     fun changeState(issueKey: String, state: String): Boolean {
         val issue = restClient.issueClient.getIssue(issueKey).claim()
         val possibleTransitions = restClient.issueClient.getTransitions(issue).claim()
@@ -80,29 +72,23 @@ class JiraNotifier(private val restClient: JiraRestClient) {
         }.onFailure {
             logger.error {
                 "The transition to state '$state' for the issue '$issueKey' is not possible: " +
-                        it.collectMessages()
+                    it.collectMessages()
             }
         }.isSuccess
     }
 
-    /**
-     * Return the issue for the given [issueKey].
-     */
-    fun getIssue(issueKey: String): Issue? {
-        return runCatching {
+    /** Return the issue for the given [issueKey]. */
+    fun getIssue(issueKey: String): Issue? =
+        runCatching {
             restClient.issueClient.getIssue(issueKey).claim()
         }.onFailure {
             logger.error {
                 "Could not retrieve the issue with the key '$issueKey' due to: ${it.collectMessages()}"
             }
         }.getOrNull()
-    }
 
-    /**
-     * Returns a [ProjectIssueBuilder] object, which can be used to do operations for the given [projectKey].
-     */
-    fun projectIssueBuilder(projectKey: String): ProjectIssueBuilder =
-        ProjectIssueBuilder(projectKey, restClient)
+    /** Returns a [ProjectIssueBuilder] object, which can be used to do operations for the given [projectKey]. */
+    fun projectIssueBuilder(projectKey: String): ProjectIssueBuilder = ProjectIssueBuilder(projectKey, restClient)
 
     class ProjectIssueBuilder(private val projectKey: String, private val restClient: JiraRestClient) {
         private val issueTypes by lazy {
@@ -128,7 +114,7 @@ class JiraNotifier(private val restClient: JiraRestClient) {
                 return Result.failure(
                     IllegalArgumentException(
                         "The issue type '$issueType' is not valid. Use a valid issue type as specified in your " +
-                                "project '$projectKey'."
+                            "project '$projectKey'."
                     )
                 )
             }
@@ -167,7 +153,7 @@ class JiraNotifier(private val restClient: JiraRestClient) {
                     }.map { issue }.onFailure {
                         logger.error {
                             "The comment for the issue '${issue.key} could not be added: " +
-                                    it.collectMessages()
+                                it.collectMessages()
                         }
                     }
                 } else if (searchResult.total > 1) {
@@ -188,7 +174,7 @@ class JiraNotifier(private val restClient: JiraRestClient) {
             }.onFailure {
                 logger.error {
                     "The issue for the project '$projectKey' could not be created: " +
-                            it.collectMessages()
+                        it.collectMessages()
                 }
             }
         }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,17 +19,11 @@
 
 package org.ossreviewtoolkit.model
 
-/**
- * An enum to describe the different types of [Package]s.
- */
+/** An enum to describe the different types of [Package]s. */
 enum class PackageType {
-    /**
-     * A package that represents a dependency of a [Project] and is not a [Project] itself.
-     */
+    /** A package that represents a dependency of a [Project] and is not a [Project] itself. */
     PACKAGE,
 
-    /**
-     * A package that was created from a [Project].
-     */
+    /** A package that was created from a [Project]. */
     PROJECT
 }

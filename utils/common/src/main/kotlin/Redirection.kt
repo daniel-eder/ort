@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,18 +19,15 @@
 
 package org.ossreviewtoolkit.utils.common
 
+import java.io.ByteArrayOutputStream
 import java.io.FileInputStream
-import java.io.FileOutputStream
 import java.io.PrintStream
 
-import kotlin.io.path.createTempFile
-
 private fun redirectOutput(originalOutput: PrintStream, setOutput: (PrintStream) -> Unit, block: () -> Unit): String {
-    val tempFile = createTempFile("redirect").toFile()
-    val fileStream = FileOutputStream(tempFile)
+    val outputStream = ByteArrayOutputStream()
 
     try {
-        PrintStream(fileStream).use {
+        PrintStream(outputStream).use {
             setOutput(it)
             block()
         }
@@ -38,22 +35,16 @@ private fun redirectOutput(originalOutput: PrintStream, setOutput: (PrintStream)
         setOutput(originalOutput)
     }
 
-    return tempFile.readText().also { tempFile.delete() }
+    return outputStream.toString()
 }
 
-/**
- * Redirect the standard error stream to a [String] during the execution of [block].
- */
+/** Redirect the standard error stream to a [String] during the execution of [block]. */
 fun redirectStderr(block: () -> Unit) = redirectOutput(System.err, System::setErr, block)
 
-/**
- * Redirect the standard output stream to a [String] during the execution of [block].
- */
+/** Redirect the standard output stream to a [String] during the execution of [block]. */
 fun redirectStdout(block: () -> Unit) = redirectOutput(System.out, System::setOut, block)
 
-/**
- * Suppress any prompts for input by redirecting standard input to the null device.
- */
+/** Suppress any prompts for input by redirecting standard input to the null device. */
 fun <T> suppressInput(block: () -> T): T {
     val originalInput = System.`in`
 

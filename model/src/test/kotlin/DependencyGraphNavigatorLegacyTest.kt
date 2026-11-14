@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2021 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2021 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,6 @@ package org.ossreviewtoolkit.model
  * containing a dependency graph in the legacy format.
  */
 class DependencyGraphNavigatorLegacyTest : AbstractDependencyNavigatorTest() {
-    override val resultFileName = "src/test/assets/sbt-multi-project-example-graph-old.yml"
-
-    override val resultWithIssuesFileName = "src/test/assets/result-with-issues-graph-old.yml"
+    override val resultFileName = "/sbt-multi-project-example-graph-old.yml"
+    override val resultWithIssuesFileName = "/result-with-issues-graph-old.yml"
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,23 +22,21 @@ package org.ossreviewtoolkit.utils.common
 import org.springframework.util.AntPathMatcher
 
 /**
- * A class to determine whether a path is matched by any of the given globs.
+ * A class to determine whether paths are matched by globs. It can either be used via its static
+ * [match][FileMatcher.Companion.matches] functions, or (in case different paths have to be matched against the same
+ * patterns in the same way over and over again) by instantiating it with fixed [patterns], optionally ignoring case.
  */
 class FileMatcher(
     /**
      * The collection of [glob patterns][1] to consider for matching.
      *
-     * [1]: https://docs.oracle.com/javase/tutorial/essential/io/fileOps.html#glob
+     * [1]: https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/util/AntPathMatcher.html
      */
     val patterns: Collection<String>,
 
-    /**
-     * Toggle the case-sensitivity of the matching.
-     */
+    /** Toggle the case-sensitivity of the matching. */
     ignoreCase: Boolean = false
 ) {
-    constructor(vararg patterns: String, ignoreCase: Boolean = false) : this(patterns.asList(), ignoreCase)
-
     companion object {
         private val matchCaseInsensitive = AntPathMatcher().apply { setCaseSensitive(false) }::match
         private val matchCaseSensitive = AntPathMatcher().apply { setCaseSensitive(true) }::match
@@ -47,22 +45,22 @@ class FileMatcher(
          * Return true if [path] is matched by [pattern], false otherwise. The [path] must use '/' as separators, if it
          * contains any.
          */
-        fun match(pattern: String, path: String, ignoreCase: Boolean = false) =
-            when (ignoreCase) {
-                true -> matchCaseInsensitive(pattern, path)
-                false -> matchCaseSensitive(pattern, path)
-            }
+        fun matches(pattern: String, path: String, ignoreCase: Boolean = false) =
+            if (ignoreCase) matchCaseInsensitive(pattern, path) else matchCaseSensitive(pattern, path)
 
         /**
          * Return true if [path] is matched by any of [patterns], false otherwise. The [path] must use '/' as
          * separators, if it contains any.
          */
-        fun match(patterns: Collection<String>, path: String, ignoreCase: Boolean = false) =
-            when (ignoreCase) {
-                true -> patterns.any { pattern -> matchCaseInsensitive(pattern, path) }
-                false -> patterns.any { pattern -> matchCaseSensitive(pattern, path) }
-            }
+        fun matches(patterns: Collection<String>, path: String, ignoreCase: Boolean = false): Boolean {
+            // Only decide once for all patterns which function to call.
+            val match = if (ignoreCase) matchCaseInsensitive else matchCaseSensitive
+
+            return patterns.any { pattern -> match(pattern, path) }
+        }
     }
+
+    constructor(vararg patterns: String, ignoreCase: Boolean = false) : this(patterns.asList(), ignoreCase)
 
     private val match = if (ignoreCase) matchCaseInsensitive else matchCaseSensitive
 

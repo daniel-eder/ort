@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The ORT Project Authors (see <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>)
+ * Copyright (C) 2017 The ORT Project Copyright Holders <https://github.com/oss-review-toolkit/ort/blob/main/NOTICE>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,46 +17,104 @@
  * License-Filename: LICENSE
  */
 
+import dev.aga.gradle.versioncatalogs.Generator.generate
+import dev.aga.gradle.versioncatalogs.GeneratorConfig
+
+// Enable type-safe project accessors, see:
+// https://docs.gradle.org/current/userguide/declaring_dependencies_basics.html#sec:type-safe-project-accessors
+enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
+
 rootProject.name = "oss-review-toolkit"
 
 include(":advisor")
 include(":analyzer")
 include(":cli")
-include(":clients:clearly-defined")
-include(":clients:fossid-webapp")
-include(":clients:github-graphql")
-include(":clients:nexus-iq")
-include(":clients:oss-index")
-include(":clients:osv")
-include(":clients:scanoss")
-include(":clients:vulnerable-code")
+include(":cli-helper")
+include(":cli-test-launcher")
 include(":detekt-rules")
 include(":downloader")
 include(":evaluator")
-include(":examples:evaluator-rules")
-include(":examples:notifications")
-include(":helper-cli")
 include(":model")
 include(":notifier")
 include(":reporter")
-include(":reporter-web-app")
 include(":scanner")
-include(":utils:common")
-include(":utils:ort")
-include(":utils:scripting")
-include(":utils:spdx")
-include(":utils:test")
+include(":version-catalog")
 
-project(":utils:common").name = "common-utils"
-project(":utils:ort").name = "ort-utils"
-project(":utils:scripting").name = "scripting-utils"
-project(":utils:spdx").name = "spdx-utils"
-project(":utils:test").name = "test-utils"
+includeSubprojects("clients", maxDepth = 2)
+includeSubprojects("utils", maxDepth = 2)
+includeSubprojects("plugins", maxDepth = 3, "gradle-inspector", "gradle-model", "gradle-plugin", "web-app-template")
 
-val buildCacheRetentionDays: String by settings
+/**
+ * Add include statements and custom names for the projects hosted inside [directoryName] and up to [maxDepth] directory
+ * levels below, with [accompanyingProjects] to be excluded from the custom project naming logic.
+ */
+fun includeSubprojects(directoryName: String, maxDepth: Int, vararg accompanyingProjects: String) {
+    file(directoryName).walk().maxDepth(maxDepth).filter {
+        it.isFile && it.name == "build.gradle.kts"
+    }.mapTo(mutableListOf()) {
+        it.parentFile.toRelativeString(rootDir).replace(File.separatorChar, ':')
+    }.forEach { projectPath ->
+        include(":$projectPath")
 
-buildCache {
-    local {
-        removeUnusedEntriesAfterDays = buildCacheRetentionDays.toInt()
+        // Give API and subprojects of a type a dedicated name, but keep the names of accompanying project as-is.
+        val parts = projectPath.split(':', limit = maxDepth)
+        val projectName = parts.last()
+        if (parts.size == maxDepth && projectName !in accompanyingProjects) {
+            // Convert the plural name for the type of plugin to singular.
+            val singularTypeName = parts[maxDepth - 2].let { if (it == "utils") it else it.removeSuffix("s") }
+
+            project(":$projectPath").name = when (projectName) {
+                "api" -> "$singularTypeName-api"
+                else -> "$projectName-$singularTypeName"
+            }
+        }
+    }
+}
+
+pluginManagement {
+    repositories {
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+plugins {
+    // Gradle cannot access the version catalog from here, so hard-code the dependency.
+    id("com.autonomousapps.build-health").version("3.20.2")
+    id("dev.aga.gradle.version-catalog-generator").version("4.2.3")
+    id("org.gradle.toolchains.foojay-resolver-convention").version("1.0.0")
+    id("org.jetbrains.kotlinx.kover.aggregation").version("0.9.11")
+
+    // Required for the build-health plugin. Keep the version in sync with the one from the version catalog.
+    id("org.jetbrains.kotlin.jvm").version("2.4.21").apply(false)
+}
+
+dependencyResolutionManagement {
+    @Suppress("UnstableApiUsage")
+    repositories {
+        mavenCentral()
+    }
+
+    generate("jacksonLibs") {
+        fromToml("jackson-bom") {
+            aliasPrefixGenerator = GeneratorConfig.NO_PREFIX
+        }
+    }
+
+    versionCatalogs {
+        create("ktorLibs") {
+            from("io.ktor:ktor-version-catalog:3.6.1")
+        }
+    }
+}
+
+kover {
+    // This project has no JVM tests but only Vitest tests.
+    skipProjects(":plugins:reporters:web-app-template")
+
+    instrumentation {
+        // Avoid a failure in TychoFunTest due to the Felix OSGi bundle failing to start because its class loader cannot
+        // find `com.intellij.rt.coverage.instrumentation.CoverageRuntime`.
+        excludedClasses.add("org.apache.felix.scr.*")
     }
 }
